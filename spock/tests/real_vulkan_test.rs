@@ -80,6 +80,16 @@ fn test_real_vulkan_loader() {
 
     let mut instance: VkInstance = std::ptr::null_mut();
     let result = unsafe { create_instance(&create_info, std::ptr::null(), &mut instance) };
+
+    // ERROR_INCOMPATIBLE_DRIVER means the loader is present but no actual
+    // Vulkan ICD (driver) is installed. This happens on the Windows GitHub
+    // Actions runner, which ships vulkan-1.dll but no GPU driver. It's a
+    // legitimate "no Vulkan available" outcome, not a test failure.
+    if result == VkResult::ERROR_INCOMPATIBLE_DRIVER {
+        eprintln!("SKIP: Vulkan loader is present but no compatible driver is installed");
+        return;
+    }
+
     assert_eq!(
         result,
         VkResult::SUCCESS,
