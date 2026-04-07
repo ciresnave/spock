@@ -68,7 +68,10 @@ impl StructGenerator {
         // Emit doc comment from vk.xml if present
         if let Some(comment) = &struct_def.comment {
             for line in comment.lines() {
-                code.push_str(&format!("/// {}\n", line.trim()));
+                code.push_str(&format!(
+                    "/// {}\n",
+                    crate::codegen::sanitize_doc_line(line)
+                ));
             }
         }
 
@@ -92,7 +95,10 @@ impl StructGenerator {
             // Emit doc comment from vk.xml if present
             if let Some(comment) = &field.comment {
                 for line in comment.lines() {
-                    code.push_str(&format!("    /// {}\n", line.trim()));
+                    code.push_str(&format!(
+                        "    /// {}\n",
+                        crate::codegen::sanitize_doc_line(line)
+                    ));
                 }
             }
 

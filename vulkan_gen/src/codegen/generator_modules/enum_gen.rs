@@ -307,7 +307,10 @@ impl EnumGenerator {
         // Documentation comment from vk.xml if available, otherwise the type name
         if let Some(comment) = &enum_def.comment {
             for line in comment.lines() {
-                code.push_str(&format!("/// {}\n", line.trim()));
+                code.push_str(&format!(
+                    "/// {}\n",
+                    crate::codegen::sanitize_doc_line(line)
+                ));
             }
         } else {
             code.push_str(&format!("/// Vulkan enum: `{}`\n", enum_def.name));
@@ -455,7 +458,10 @@ impl EnumGenerator {
             let emit_doc = |code: &mut String| {
                 if let Some(c) = &value.comment {
                     for line in c.lines() {
-                        code.push_str(&format!("    /// {}\n", line.trim()));
+                        code.push_str(&format!(
+                            "    /// {}\n",
+                            crate::codegen::sanitize_doc_line(line)
+                        ));
                     }
                 }
             };

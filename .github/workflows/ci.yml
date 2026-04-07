@@ -53,6 +53,20 @@ jobs:
       - name: Build example
         run: cargo build -p spock --features fetch-spec --example device_info
 
+  docs:
+    name: Build docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # Build the documentation with all features enabled and treat any
+      # broken intra-doc link as an error. This is what docs.rs will do
+      # when the crate is published.
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --features fetch-spec --no-deps
+
   format:
     name: rustfmt
     runs-on: ubuntu-latest

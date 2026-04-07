@@ -68,13 +68,21 @@ impl TypeGenerator {
 
         // Add documentation (skip multi-line raw content with preprocessor directives)
         if let Some(comment) = &type_def.comment {
-            code.push_str(&format!("/// {}\n", comment));
+            for line in comment.lines() {
+                code.push_str(&format!(
+                    "/// {}\n",
+                    crate::codegen::sanitize_doc_line(line)
+                ));
+            }
         }
         let raw = type_def.raw_content.trim();
         if !raw.is_empty() && !raw.contains('#') && !raw.contains('@') {
             code.push_str("/// \n");
             for line in raw.lines() {
-                code.push_str(&format!("/// From vk.xml: {}\n", line.trim()));
+                code.push_str(&format!(
+                    "/// From vk.xml: {}\n",
+                    crate::codegen::sanitize_doc_line(line)
+                ));
             }
         }
 

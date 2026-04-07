@@ -405,6 +405,43 @@ fn test_vk_result_is_success_and_is_error() {
     assert!(!VkResult::NOT_READY.is_error());
 }
 
+#[test]
+fn test_vk_check_macro_success() {
+    fn returns_success() -> VkResult {
+        VkResult::SUCCESS
+    }
+    let result = crate::vk_check!(returns_success());
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_vk_check_macro_error() {
+    fn returns_error() -> VkResult {
+        VkResult::ERROR_OUT_OF_HOST_MEMORY
+    }
+    let result = crate::vk_check!(returns_error());
+    assert_eq!(result.unwrap_err(), VkResult::ERROR_OUT_OF_HOST_MEMORY);
+}
+
+#[test]
+fn test_vk_result_implements_error_trait() {
+    // VkResult must implement std::error::Error so it works with `?`
+    // in functions returning Box<dyn Error>.
+    fn returns_box_error() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::raw::VkResultExt;
+        VkResult::SUCCESS.into_result()?;
+        Ok(())
+    }
+    assert!(returns_box_error().is_ok());
+
+    fn propagates_error() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::raw::VkResultExt;
+        VkResult::ERROR_DEVICE_LOST.into_result()?;
+        Ok(())
+    }
+    assert!(propagates_error().is_err());
+}
+
 // ============================================================================
 // Bitmask flag tests
 // ============================================================================

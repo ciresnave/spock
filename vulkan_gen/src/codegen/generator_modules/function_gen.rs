@@ -28,7 +28,10 @@ impl FunctionGenerator {
         // Documentation comment from vk.xml if present, otherwise the function name
         if let Some(comment) = &func_def.comment {
             for line in comment.lines() {
-                code.push_str(&format!("/// {}\n", line.trim()));
+                code.push_str(&format!(
+                    "/// {}\n",
+                    crate::codegen::sanitize_doc_line(line)
+                ));
             }
         } else {
             code.push_str(&format!("/// Vulkan function: `{}`\n", func_def.name));

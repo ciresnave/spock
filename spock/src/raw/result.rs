@@ -15,7 +15,7 @@
 //!   and `is_error()` methods.
 //! - A `std::error::Error` implementation for [`VkResult`] so you can use `?`
 //!   in functions returning `Result<_, Box<dyn Error>>`.
-//! - The [`vk_check!`] macro for one-line Vulkan call validation.
+//! - The [`vk_check!`](crate::vk_check) macro for one-line Vulkan call validation.
 //!
 //! `into_result()` only treats `SUCCESS` as `Ok`. If you need to distinguish
 //! between non-fatal status codes (like `INCOMPLETE`) and outright errors,
