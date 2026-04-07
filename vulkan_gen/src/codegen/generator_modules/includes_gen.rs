@@ -11,6 +11,12 @@ use crate::parser::vk_types::IncludeStatement;
 /// Generator module for Vulkan includes
 pub struct IncludeGenerator;
 
+impl Default for IncludeGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IncludeGenerator {
     pub fn new() -> Self {
         Self

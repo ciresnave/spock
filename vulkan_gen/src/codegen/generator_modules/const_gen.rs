@@ -12,6 +12,12 @@ use super::{GeneratorError, GeneratorMetadata, GeneratorModule, GeneratorResult}
 /// Generator module for Vulkan constants
 pub struct ConstantGenerator;
 
+impl Default for ConstantGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConstantGenerator {
     pub fn new() -> Self {
         Self
@@ -79,7 +85,7 @@ impl ConstantGenerator {
         } else if v.contains('.') {
             // Float values
             "f32".to_string()
-        } else if let Ok(_) = v_unparen.parse::<i64>() {
+        } else if v_unparen.parse::<i64>().is_ok() {
             // Integer values - assume u32 for non-negative, i32 for negative
             if v_unparen.starts_with('-') {
                 "i32".to_string()
@@ -208,11 +214,11 @@ impl GeneratorModule for ConstantGenerator {
     fn generate(&self, input_dir: &Path, output_dir: &Path) -> GeneratorResult<()> {
         // Read input file
         let input_path = input_dir.join("constants.json");
-        let input_content = fs::read_to_string(input_path).map_err(|e| GeneratorError::Io(e))?;
+        let input_content = fs::read_to_string(input_path).map_err(GeneratorError::Io)?;
 
         // Parse JSON as simple array of constants
         let constants_array: Vec<ConstantDefinition> =
-            serde_json::from_str(&input_content).map_err(|e| GeneratorError::Json(e))?;
+            serde_json::from_str(&input_content).map_err(GeneratorError::Json)?;
 
         // Generate code
         let mut generated_code = String::new();
@@ -232,7 +238,7 @@ impl GeneratorModule for ConstantGenerator {
 
         // Write output file
         let output_path = output_dir.join(self.output_file());
-        fs::write(output_path, generated_code).map_err(|e| GeneratorError::Io(e))?;
+        fs::write(output_path, generated_code).map_err(GeneratorError::Io)?;
 
         // Collect metadata for dependency tracking and validation
         let metadata = self.collect_metadata(input_dir)?;
@@ -262,12 +268,11 @@ impl GeneratorModule for ConstantGenerator {
 
         // Read the constants input file
         let input_path = input_dir.join("constants.json");
-        let input_content =
-            std::fs::read_to_string(input_path).map_err(|e| GeneratorError::Io(e))?;
+        let input_content = std::fs::read_to_string(input_path).map_err(GeneratorError::Io)?;
 
         // Parse the JSON as simple array
         let constants_array: Vec<ConstantDefinition> =
-            serde_json::from_str(&input_content).map_err(|e| GeneratorError::Json(e))?;
+            serde_json::from_str(&input_content).map_err(GeneratorError::Json)?;
 
         // Collect all defined constants
         for constant in &constants_array {

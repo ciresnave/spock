@@ -16,6 +16,15 @@ struct, enum, function pointer, and dispatch table is derived from the XML at bu
 To target a different Vulkan version, swap `vk.xml` (or set the `VK_VERSION` environment
 variable) and rebuild — that's the entire upgrade procedure.
 
+Spock exposes Vulkan through two complementary APIs:
+
+- [`spock::raw`](spock/src/raw) — direct FFI bindings, exactly as the spec defines them.
+  Maximum control, zero overhead.
+- [`spock::safe`](spock/src/safe) — RAII wrappers with automatic cleanup, `Result`-based
+  error handling, and type-safe enums. Currently covers the core compute path:
+  `Instance` → `PhysicalDevice` → `Device` → `Queue`, plus `Buffer`, `DeviceMemory`,
+  `CommandPool`, `CommandBuffer`, and `Fence`.
+
 ## Why Spock?
 
 If you're already using `ash`, here's the trade-off:
@@ -46,55 +55,74 @@ If you're already using `ash`, here's the trade-off:
 The two crates are not mutually exclusive. Spock targets the same C ABI as the Vulkan spec,
 so a downstream crate can build a safe wrapper layer on top of either.
 
-## First impression
+## First impression — safe API
 
 ```rust
-use spock::raw::bindings::*;
-use spock::raw::{VkResultExt, VulkanLibrary};
+use spock::safe::{
+    ApiVersion, Buffer, BufferCreateInfo, BufferUsage, CommandPool, DeviceCreateInfo,
+    DeviceMemory, Fence, Instance, InstanceCreateInfo, MemoryPropertyFlags, QueueCreateInfo,
+    QueueFlags,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Load vulkan-1.dll / libvulkan.so.1 / etc.
-    let library = VulkanLibrary::new()?;
-
-    // Load global Vulkan functions (vkCreateInstance, etc.)
-    let entry = unsafe { library.load_entry() };
-
-    // Create an instance the normal Vulkan way
-    let app_info = VkApplicationInfo {
-        sType: VkStructureType::STRUCTURE_TYPE_APPLICATION_INFO,
-        pNext: std::ptr::null(),
-        pApplicationName: c"hello-spock".as_ptr() as *const i8,
-        applicationVersion: vk_make_api_version(0, 0, 1, 0),
-        pEngineName: std::ptr::null(),
-        engineVersion: 0,
-        apiVersion: VK_API_VERSION_1_0,
-    };
-    let create_info = VkInstanceCreateInfo {
-        sType: VkStructureType::STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        pApplicationInfo: &app_info,
+    // Load Vulkan and create an instance — RAII handles cleanup.
+    let instance = Instance::new(InstanceCreateInfo {
+        application_name: Some("hello-spock"),
+        api_version: ApiVersion::V1_0,
         ..Default::default()
-    };
-    let mut instance: VkInstance = std::ptr::null_mut();
-    unsafe { (entry.vkCreateInstance.unwrap())(&create_info, std::ptr::null(), &mut instance) }
-        .into_result()?;
+    })?;
 
-    // Load instance-level functions for the new instance
-    let inst = unsafe { library.load_instance(instance) };
+    // Pick a physical device with a transfer-capable queue.
+    let physical = instance
+        .enumerate_physical_devices()?
+        .into_iter()
+        .find(|pd| pd.find_queue_family(QueueFlags::TRANSFER).is_some())
+        .ok_or("no compatible GPU")?;
+    let qf = physical.find_queue_family(QueueFlags::TRANSFER).unwrap();
 
-    // Enumerate physical devices
-    let mut count = 0u32;
-    unsafe { (inst.vkEnumeratePhysicalDevices.unwrap())(instance, &mut count, std::ptr::null_mut()) }
-        .into_result()?;
-    println!("Found {} GPU(s)", count);
+    // Create a logical device with one queue.
+    let device = physical.create_device(DeviceCreateInfo {
+        queue_create_infos: &[QueueCreateInfo {
+            queue_family_index: qf,
+            queue_priorities: vec![1.0],
+        }],
+    })?;
+    let queue = device.get_queue(qf, 0);
 
-    // Clean up
-    unsafe { (inst.vkDestroyInstance.unwrap())(instance, std::ptr::null()) };
+    // Allocate a host-visible buffer.
+    let buffer = Buffer::new(&device, BufferCreateInfo {
+        size: 1024,
+        usage: BufferUsage::TRANSFER_DST,
+    })?;
+    let req = buffer.memory_requirements();
+    let mt = physical
+        .find_memory_type(req.memory_type_bits,
+            MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT)
+        .unwrap();
+    let mut memory = DeviceMemory::allocate(&device, req.size, mt)?;
+    buffer.bind_memory(&memory, 0)?;
+
+    // Record vkCmdFillBuffer and submit it to the GPU.
+    let pool = CommandPool::new(&device, qf)?;
+    let mut cmd = pool.allocate_primary()?;
+    cmd.begin()?.fill_buffer(&buffer, 0, 1024, 0xDEADBEEF);
+    let fence = Fence::new(&device)?;
+    queue.submit(&[&cmd], Some(&fence))?;
+    fence.wait(u64::MAX)?;
+
+    // Read it back from the host side.
+    let mapped = memory.map()?;
+    assert_eq!(&mapped.as_slice()[..4], &0xDEADBEEFu32.to_ne_bytes());
+    println!("GPU filled the buffer with 0xDEADBEEF");
+
+    // Everything drops here in the right order — no manual vkDestroy* calls.
     Ok(())
 }
 ```
 
-For a more complete example that creates a logical device and inspects memory heaps and queue
-families, see [`spock/examples/device_info.rs`](spock/examples/device_info.rs).
+For the equivalent program in the raw API (more verbose but zero-overhead), see
+[`spock/examples/device_info.rs`](spock/examples/device_info.rs).
+For the full GPU round-trip, see [`spock/examples/fill_buffer.rs`](spock/examples/fill_buffer.rs).
 
 ## Quick Start
 

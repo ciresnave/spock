@@ -1,0 +1,225 @@
+//! Safe wrapper for `VkDevice` and `VkQueue`.
+
+use super::physical::PhysicalDevice;
+use super::{Error, Result, check};
+use crate::raw::VulkanLibrary;
+use crate::raw::bindings::*;
+use std::sync::Arc;
+
+/// Parameters for creating a single device queue.
+#[derive(Debug, Clone)]
+pub struct QueueCreateInfo {
+    /// The index of the queue family to create the queue from.
+    pub queue_family_index: u32,
+    /// Priority for each queue, in the range `[0.0, 1.0]`.
+    /// The number of queues to create equals `queue_priorities.len()`.
+    pub queue_priorities: Vec<f32>,
+}
+
+/// Parameters for [`PhysicalDevice::create_device`].
+#[derive(Debug, Clone)]
+pub struct DeviceCreateInfo<'a> {
+    /// One or more queues to create from queue families.
+    pub queue_create_infos: &'a [QueueCreateInfo],
+}
+
+// `&[T]` does implement `Default` (returns an empty slice), so technically
+// this could be derived — but clippy's suggestion fights with the lifetime
+// parameter on `DeviceCreateInfo<'a>`. The manual impl is clearer.
+#[allow(clippy::derivable_impls)]
+impl<'a> Default for DeviceCreateInfo<'a> {
+    fn default() -> Self {
+        Self {
+            queue_create_infos: &[],
+        }
+    }
+}
+
+/// Internal state shared between [`Device`] and its child handles.
+pub(crate) struct DeviceInner {
+    pub(crate) handle: VkDevice,
+    pub(crate) dispatch: VkDeviceDispatchTable,
+    /// Keep the parent instance alive as long as any device child is alive.
+    /// Field is unread but its `Drop` semantics are essential.
+    #[allow(dead_code)]
+    pub(crate) instance: Arc<super::instance::InstanceInner>,
+}
+
+// Safety: VkDevice is documented by the Vulkan spec as safe to share between
+// threads. Individual function calls have their own external synchronization
+// requirements (queue submission, command buffer recording, etc. — these are
+// the caller's responsibility), but the handle itself is thread-safe.
+unsafe impl Send for DeviceInner {}
+unsafe impl Sync for DeviceInner {}
+
+impl Drop for DeviceInner {
+    fn drop(&mut self) {
+        if let Some(destroy) = self.dispatch.vkDestroyDevice {
+            // Safety: handle is valid (constructed by Device::new), and
+            // by the Arc invariant we are the last owner.
+            unsafe { destroy(self.handle, std::ptr::null()) };
+        }
+    }
+}
+
+/// A safe wrapper around `VkDevice`.
+///
+/// The device is destroyed automatically when the last `Device` clone (and
+/// the last child handle that holds an `Arc<DeviceInner>`) is dropped.
+#[derive(Clone)]
+pub struct Device {
+    pub(crate) inner: Arc<DeviceInner>,
+}
+
+impl Device {
+    pub(crate) fn new(physical: &PhysicalDevice, info: DeviceCreateInfo<'_>) -> Result<Self> {
+        let create = physical
+            .instance
+            .dispatch
+            .vkCreateDevice
+            .ok_or(Error::MissingFunction("vkCreateDevice"))?;
+
+        // Build the raw VkDeviceQueueCreateInfo array. We need to keep the
+        // priority slices alive across the call.
+        let mut raw_infos: Vec<VkDeviceQueueCreateInfo> =
+            Vec::with_capacity(info.queue_create_infos.len());
+        for qci in info.queue_create_infos {
+            raw_infos.push(VkDeviceQueueCreateInfo {
+                sType: VkStructureType::STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                pNext: std::ptr::null(),
+                flags: 0,
+                queueFamilyIndex: qci.queue_family_index,
+                queueCount: qci.queue_priorities.len() as u32,
+                pQueuePriorities: qci.queue_priorities.as_ptr(),
+            });
+        }
+
+        let create_info = VkDeviceCreateInfo {
+            sType: VkStructureType::STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+            queueCreateInfoCount: raw_infos.len() as u32,
+            pQueueCreateInfos: raw_infos.as_ptr(),
+            ..Default::default()
+        };
+
+        let mut handle: VkDevice = std::ptr::null_mut();
+        // Safety: create_info is valid for the call. raw_infos and the
+        // priority slices outlive the call (they're owned by `info` which
+        // outlives this function).
+        check(unsafe { create(physical.handle, &create_info, std::ptr::null(), &mut handle) })?;
+
+        // Load device-level dispatch table.
+        // Safety: handle and instance are both valid.
+        let library: &VulkanLibrary = &physical.instance.library;
+        let dispatch = unsafe { library.load_device(physical.instance.handle, handle) };
+
+        Ok(Self {
+            inner: Arc::new(DeviceInner {
+                handle,
+                dispatch,
+                instance: Arc::clone(&physical.instance),
+            }),
+        })
+    }
+
+    /// Returns the raw `VkDevice` handle.
+    pub fn raw(&self) -> VkDevice {
+        self.inner.handle
+    }
+
+    /// Get the i-th queue of the given family.
+    ///
+    /// Note: per the Vulkan spec, the queue must have been requested at
+    /// device creation time via [`QueueCreateInfo`]. Calling this with
+    /// indices that weren't requested is undefined behavior.
+    pub fn get_queue(&self, queue_family_index: u32, queue_index: u32) -> Queue {
+        let get = self
+            .inner
+            .dispatch
+            .vkGetDeviceQueue
+            .expect("vkGetDeviceQueue is required by Vulkan 1.0");
+
+        let mut queue: VkQueue = std::ptr::null_mut();
+        // Safety: device handle is valid, queue indices were validated by
+        // the spec at device creation. The output is just a handle; nothing
+        // is allocated.
+        unsafe {
+            get(
+                self.inner.handle,
+                queue_family_index,
+                queue_index,
+                &mut queue,
+            )
+        };
+
+        Queue {
+            handle: queue,
+            device: Arc::clone(&self.inner),
+        }
+    }
+
+    /// Wait for the device to become idle.
+    pub fn wait_idle(&self) -> Result<()> {
+        let wait = self
+            .inner
+            .dispatch
+            .vkDeviceWaitIdle
+            .ok_or(Error::MissingFunction("vkDeviceWaitIdle"))?;
+        // Safety: device handle is valid.
+        check(unsafe { wait(self.inner.handle) })
+    }
+}
+
+/// A handle to a queue belonging to a [`Device`].
+///
+/// Queues are owned by the device and cannot be destroyed independently.
+/// This handle keeps the device alive via an `Arc`.
+#[derive(Clone)]
+pub struct Queue {
+    pub(crate) handle: VkQueue,
+    pub(crate) device: Arc<DeviceInner>,
+}
+
+impl Queue {
+    /// Returns the raw `VkQueue` handle.
+    pub fn raw(&self) -> VkQueue {
+        self.handle
+    }
+
+    /// Submit one or more command buffers, optionally signaling a fence on completion.
+    pub fn submit(
+        &self,
+        command_buffers: &[&super::CommandBuffer],
+        signal_fence: Option<&super::Fence>,
+    ) -> Result<()> {
+        let submit = self
+            .device
+            .dispatch
+            .vkQueueSubmit
+            .ok_or(Error::MissingFunction("vkQueueSubmit"))?;
+
+        let raw_cmds: Vec<VkCommandBuffer> = command_buffers.iter().map(|c| c.raw()).collect();
+
+        let submit_info = VkSubmitInfo {
+            sType: VkStructureType::STRUCTURE_TYPE_SUBMIT_INFO,
+            commandBufferCount: raw_cmds.len() as u32,
+            pCommandBuffers: raw_cmds.as_ptr(),
+            ..Default::default()
+        };
+
+        let fence_handle = signal_fence.map_or(0u64, super::Fence::raw);
+
+        // Safety: submit_info is valid for the call, raw_cmds outlives it.
+        check(unsafe { submit(self.handle, 1, &submit_info, fence_handle) })
+    }
+
+    /// Wait for the queue to become idle.
+    pub fn wait_idle(&self) -> Result<()> {
+        let wait = self
+            .device
+            .dispatch
+            .vkQueueWaitIdle
+            .ok_or(Error::MissingFunction("vkQueueWaitIdle"))?;
+        // Safety: queue handle is valid.
+        check(unsafe { wait(self.handle) })
+    }
+}

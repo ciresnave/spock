@@ -206,10 +206,10 @@ pub fn check_data_consistency(intermediate_dir: &Path) -> TypeIntegrationResult<
                         for s in structs_arr.iter_mut() {
                             if let Some(fields_val) = s.get("fields").cloned() {
                                 // Move fields -> members
-                                s.as_object_mut().map(|o| {
+                                if let Some(o) = s.as_object_mut() {
                                     o.insert("members".to_string(), fields_val);
                                     o.remove("fields");
-                                });
+                                }
                                 if let Some(obj) = s.as_object_mut() {
                                     // Ensure struct has raw_content
                                     if !obj.contains_key("raw_content") {
@@ -241,10 +241,10 @@ pub fn check_data_consistency(intermediate_dir: &Path) -> TypeIntegrationResult<
                             {
                                 for member in members_arr.iter_mut() {
                                     if let Some(ft) = member.get("field_type").cloned() {
-                                        member.as_object_mut().map(|o| {
+                                        if let Some(o) = member.as_object_mut() {
                                             o.insert("type_name".to_string(), ft);
                                             o.remove("field_type");
-                                        });
+                                        }
                                         // Ensure required fields exist for StructMember
                                         if let Some(mobj) = member.as_object_mut() {
                                             if !mobj.contains_key("definition") {

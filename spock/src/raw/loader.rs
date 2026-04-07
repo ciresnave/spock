@@ -93,29 +93,47 @@ impl VulkanLibrary {
     }
 
     /// Load global (entry-level) functions that don't require a VkInstance.
+    ///
+    /// # Safety
+    ///
+    /// The returned dispatch table contains function pointers that must only
+    /// be called following the Vulkan API contract. The caller must:
+    ///
+    /// - Pass valid arguments to each loaded function.
+    /// - Not call any function after the underlying Vulkan library is unloaded.
+    /// - Treat all `unsafe extern "system"` function pointers as `unsafe fn`.
     pub unsafe fn load_entry(&self) -> VkEntryDispatchTable {
         let gipa = self.get_instance_proc_addr;
         unsafe {
-            VkEntryDispatchTable::load(|name| {
-                (gipa)(std::ptr::null_mut(), name.as_ptr() as *const i8)
-            })
+            VkEntryDispatchTable::load(|name| (gipa)(std::ptr::null_mut(), name.as_ptr().cast()))
         }
     }
 
     /// Load instance-level functions for the given VkInstance.
+    ///
+    /// # Safety
+    ///
+    /// `instance` must be a valid `VkInstance` handle returned from
+    /// `vkCreateInstance`. The caller must not call any function from the
+    /// returned dispatch table after the instance is destroyed.
     pub unsafe fn load_instance(&self, instance: VkInstance) -> VkInstanceDispatchTable {
         let gipa = self.get_instance_proc_addr;
         unsafe {
-            VkInstanceDispatchTable::load(|name| {
-                (gipa)(instance as *mut c_void, name.as_ptr() as *const i8)
-            })
+            VkInstanceDispatchTable::load(|name| (gipa)(instance.cast(), name.as_ptr().cast()))
         }
     }
 
     /// Load device-level functions for the given VkDevice.
     ///
     /// `instance` is the VkInstance that owns the device — it is required because
-    /// `vkGetDeviceProcAddr` is loaded via `vkGetInstanceProcAddr(instance, ...)`.
+    /// `vkGetDeviceProcAddr` is itself loaded via `vkGetInstanceProcAddr(instance, ...)`.
+    ///
+    /// # Safety
+    ///
+    /// Both `instance` and `device` must be valid Vulkan handles. The device
+    /// must have been created from this instance. The caller must not call
+    /// any function from the returned dispatch table after the device is
+    /// destroyed.
     pub unsafe fn load_device(
         &self,
         instance: VkInstance,
@@ -123,27 +141,23 @@ impl VulkanLibrary {
     ) -> VkDeviceDispatchTable {
         let gipa = self.get_instance_proc_addr;
 
-        // First, get vkGetDeviceProcAddr via the instance loader.
+        // Load vkGetDeviceProcAddr via the instance loader.
         // Per the Vulkan spec, vkGetDeviceProcAddr must be loaded with a
         // valid VkInstance handle (not NULL).
         let gdpa_name = c"vkGetDeviceProcAddr";
-        let gdpa_ptr = unsafe { (gipa)(instance as *mut c_void, gdpa_name.as_ptr() as *const i8) };
+        let gdpa_ptr = unsafe { (gipa)(instance.cast(), gdpa_name.as_ptr().cast()) };
 
         if !gdpa_ptr.is_null() {
             // Use vkGetDeviceProcAddr for fastest device-level dispatch.
             let gdpa: unsafe extern "system" fn(*mut c_void, *const i8) -> *mut c_void =
                 unsafe { std::mem::transmute(gdpa_ptr) };
             unsafe {
-                VkDeviceDispatchTable::load(|name| {
-                    (gdpa)(device as *mut c_void, name.as_ptr() as *const i8)
-                })
+                VkDeviceDispatchTable::load(|name| (gdpa)(device.cast(), name.as_ptr().cast()))
             }
         } else {
             // Fallback: load via instance proc addr (slower, instance-level dispatch).
             unsafe {
-                VkDeviceDispatchTable::load(|name| {
-                    (gipa)(instance as *mut c_void, name.as_ptr() as *const i8)
-                })
+                VkDeviceDispatchTable::load(|name| (gipa)(instance.cast(), name.as_ptr().cast()))
             }
         }
     }

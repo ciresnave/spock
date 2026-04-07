@@ -12,6 +12,12 @@ use super::{GeneratorError, GeneratorMetadata, GeneratorModule, GeneratorResult}
 /// Generator module for Vulkan enums
 pub struct EnumGenerator;
 
+impl Default for EnumGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EnumGenerator {
     pub fn new() -> Self {
         Self
@@ -33,7 +39,7 @@ impl EnumGenerator {
             Op(char),
             Shift(String),
             Caret,
-            EOF,
+            Eof,
             LParen,
             RParen,
         }
@@ -141,7 +147,7 @@ impl EnumGenerator {
                 chars.next();
                 return vec![];
             }
-            out.push(Tok::EOF);
+            out.push(Tok::Eof);
             out
         }
 
@@ -203,45 +209,30 @@ impl EnumGenerator {
 
             fn parse_bit_and(toks: &[Tok], idx: &mut usize) -> Option<i128> {
                 let mut lhs = parse_shift(toks, idx)?;
-                loop {
-                    match toks.get(*idx) {
-                        Some(Tok::Op('&')) => {
-                            *idx += 1;
-                            let rhs = parse_shift(toks, idx)?;
-                            lhs = lhs & rhs;
-                        }
-                        _ => break,
-                    }
+                while let Some(Tok::Op('&')) = toks.get(*idx) {
+                    *idx += 1;
+                    let rhs = parse_shift(toks, idx)?;
+                    lhs &= rhs;
                 }
                 Some(lhs)
             }
 
             fn parse_bit_xor(toks: &[Tok], idx: &mut usize) -> Option<i128> {
                 let mut lhs = parse_bit_and(toks, idx)?;
-                loop {
-                    match toks.get(*idx) {
-                        Some(Tok::Caret) => {
-                            *idx += 1;
-                            let rhs = parse_bit_and(toks, idx)?;
-                            lhs = lhs ^ rhs;
-                        }
-                        _ => break,
-                    }
+                while let Some(Tok::Caret) = toks.get(*idx) {
+                    *idx += 1;
+                    let rhs = parse_bit_and(toks, idx)?;
+                    lhs ^= rhs;
                 }
                 Some(lhs)
             }
 
             fn parse_bit_or(toks: &[Tok], idx: &mut usize) -> Option<i128> {
                 let mut lhs = parse_bit_xor(toks, idx)?;
-                loop {
-                    match toks.get(*idx) {
-                        Some(Tok::Op('|')) => {
-                            *idx += 1;
-                            let rhs = parse_bit_xor(toks, idx)?;
-                            lhs = lhs | rhs;
-                        }
-                        _ => break,
-                    }
+                while let Some(Tok::Op('|')) = toks.get(*idx) {
+                    *idx += 1;
+                    let rhs = parse_bit_xor(toks, idx)?;
+                    lhs |= rhs;
                 }
                 Some(lhs)
             }
@@ -254,12 +245,12 @@ impl EnumGenerator {
                         Some(Tok::Op('+')) => {
                             *idx += 1;
                             let rhs = parse_bit_or(toks, idx)?;
-                            lhs = lhs + rhs;
+                            lhs += rhs;
                         }
                         Some(Tok::Op('-')) => {
                             *idx += 1;
                             let rhs = parse_bit_or(toks, idx)?;
-                            lhs = lhs - rhs;
+                            lhs -= rhs;
                         }
                         _ => break,
                     }
@@ -434,14 +425,12 @@ impl EnumGenerator {
                 continue;
             }
 
+            // Prefer the explicit value, fall back to bitpos.
+            // The actual `1 << bitpos` computation happens below.
             let value_str = value
                 .value
                 .as_deref()
-                .or(value.bitpos.as_deref().map(|bp| {
-                    // bitpos values: compute 1 << bitpos
-                    // We handle this in format_enum_value
-                    bp
-                }))
+                .or(value.bitpos.as_deref())
                 .unwrap_or("0");
 
             // For bitpos values, compute the actual value
@@ -562,13 +551,11 @@ impl EnumGenerator {
         let prefixes = ["VK_", "VkResult", "VkFormat", "VkImageType"];
 
         for prefix in &prefixes {
-            if name.starts_with(prefix) {
-                let without_prefix = &name[prefix.len()..];
-                if without_prefix.starts_with('_') {
-                    return without_prefix[1..].to_string();
-                } else {
-                    return without_prefix.to_string();
-                }
+            if let Some(without_prefix) = name.strip_prefix(prefix) {
+                return without_prefix
+                    .strip_prefix('_')
+                    .unwrap_or(without_prefix)
+                    .to_string();
             }
         }
 
@@ -597,7 +584,7 @@ impl EnumGenerator {
 
         // Strip unsigned/long/float suffixes common in C (U, UL, ULL, F)
         v = v
-            .trim_end_matches(|c: char| matches!(c, 'U' | 'u' | 'L' | 'l' | 'F' | 'f'))
+            .trim_end_matches(['U', 'u', 'L', 'l', 'F', 'f'])
             .to_string();
 
         // Convert bitwise not of unsigned (~0U) into Rust literal using !0u32 or !0u64
@@ -751,7 +738,7 @@ fn infer_const_type(value: &str) -> String {
 
     // Normalize common C suffixes for easier detection
     let cleaned = cleaned
-        .trim_end_matches(|c: char| matches!(c, 'U' | 'u' | 'L' | 'l' | 'F' | 'f'))
+        .trim_end_matches(['U', 'u', 'L', 'l', 'F', 'f'])
         .trim();
 
     // Bitwise-not patterns like ~0 or ~0U should be unsigned
@@ -779,7 +766,7 @@ fn infer_const_type(value: &str) -> String {
     }
 
     // Signed/unsigned integer detection
-    if let Ok(_) = cleaned.parse::<i64>() {
+    if cleaned.parse::<i64>().is_ok() {
         if cleaned.starts_with('-') {
             return "i64".to_string();
         }
@@ -817,7 +804,7 @@ fn map_const_value(value: &str, value_type: &str) -> String {
 
     // Remove trailing C suffixes
     rust_value = rust_value
-        .trim_end_matches(|c: char| matches!(c, 'U' | 'u' | 'L' | 'l' | 'F' | 'f'))
+        .trim_end_matches(['U', 'u', 'L', 'l', 'F', 'f'])
         .to_string();
 
     // Hex values: keep as-is
@@ -831,7 +818,7 @@ fn map_const_value(value: &str, value_type: &str) -> String {
     }
 
     // Numeric literal with optional sign
-    if let Ok(_) = rust_value.parse::<i128>() {
+    if rust_value.parse::<i128>().is_ok() {
         // Ensure integer width matches inferred type
         match value_type {
             "u32" => return format!("{}u32", rust_value),
@@ -879,7 +866,7 @@ impl GeneratorModule for EnumGenerator {
     fn generate(&self, input_dir: &Path, output_dir: &Path) -> GeneratorResult<()> {
         // Read input file
         let input_path = input_dir.join("enums.json");
-        let input_content = fs::read_to_string(&input_path).map_err(|e| GeneratorError::Io(e))?;
+        let input_content = fs::read_to_string(&input_path).map_err(GeneratorError::Io)?;
 
         // Parse JSON - try plain array first, then object-with-array { "enums": [...] }, then fallback to JSONL
         let enums_array: Vec<EnumDefinition> =
@@ -935,7 +922,7 @@ impl GeneratorModule for EnumGenerator {
 
         // Write output file
         let output_path = output_dir.join(self.output_file());
-        fs::write(output_path, generated_code).map_err(|e| GeneratorError::Io(e))?;
+        fs::write(output_path, generated_code).map_err(GeneratorError::Io)?;
 
         // Collect and report metadata
         let _metadata = self.collect_metadata(input_dir)?;
@@ -962,8 +949,7 @@ impl GeneratorModule for EnumGenerator {
 
         // Read the enums input file
         let input_path = input_dir.join("enums.json");
-        let input_content =
-            std::fs::read_to_string(input_path).map_err(|e| GeneratorError::Io(e))?;
+        let input_content = std::fs::read_to_string(input_path).map_err(GeneratorError::Io)?;
 
         // Parse JSON - try plain array, then object-with-array wrapper
         let enums_array: Vec<EnumDefinition> =
@@ -975,8 +961,8 @@ impl GeneratorModule for EnumGenerator {
                         enums: Vec<EnumDefinition>,
                     }
 
-                    let wrapper: EnumsFile = serde_json::from_str(&input_content)
-                        .map_err(|e| GeneratorError::Json(e))?;
+                    let wrapper: EnumsFile =
+                        serde_json::from_str(&input_content).map_err(GeneratorError::Json)?;
                     wrapper.enums
                 }
             };

@@ -36,6 +36,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      # Install a software Vulkan implementation on Linux so the real-Vulkan
+      # integration test (and any GPU examples) can actually run in CI.
+      # Lavapipe is Mesa's Vulkan software rasterizer — it implements the
+      # Vulkan 1.3 API in software and is good enough to validate that our
+      # generated bindings work end-to-end against a real driver.
+      - name: Install Lavapipe (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+          # Verify the loader can find the ICD
+          vulkaninfo --summary || true
+
       # vk.xml is downloaded automatically via the fetch-spec feature on CI
       # so we don't need to vendor a copy of the spec.
       - name: Build (default features)
@@ -45,13 +58,20 @@ jobs:
         run: cargo build -p spock --features fetch-spec --no-default-features
 
       - name: Run unit tests
-        # The real-Vulkan integration test gracefully skips when no driver
-        # is installed (CI runners don't have GPU drivers), so this is safe
-        # to run on all platforms.
+        # On Linux, Lavapipe is installed above so the real-Vulkan integration
+        # test will actually exercise the loader against a software Vulkan
+        # implementation. On Windows/macOS the test gracefully skips if no
+        # driver is found.
         run: cargo test --workspace --features fetch-spec
 
-      - name: Build example
-        run: cargo build -p spock --features fetch-spec --example device_info
+      - name: Build examples
+        run: |
+          cargo build -p spock --features fetch-spec --example device_info
+          cargo build -p spock --features fetch-spec --example fill_buffer
+
+      - name: Run device_info example (Linux only, with Lavapipe)
+        if: runner.os == 'Linux'
+        run: cargo run -p spock --features fetch-spec --example device_info
 
   docs:
     name: Build docs
@@ -86,7 +106,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      # Clippy is informational for now; the build job already enforces no
-      # compiler warnings. Cleanup of clippy lints is tracked separately.
       - name: Run clippy
-        run: cargo clippy -p spock --features fetch-spec || true
+        run: cargo clippy --workspace --features fetch-spec -- -D warnings

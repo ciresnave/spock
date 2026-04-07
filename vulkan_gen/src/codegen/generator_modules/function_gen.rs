@@ -12,6 +12,12 @@ use crate::parser::vk_types::FunctionDefinition;
 /// Generator module for Vulkan functions
 pub struct FunctionGenerator;
 
+impl Default for FunctionGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FunctionGenerator {
     pub fn new() -> Self {
         Self
@@ -314,8 +320,7 @@ impl GeneratorModule for FunctionGenerator {
         // so they must come after structs, which is why they're here instead of in TypeGenerator)
         let types_path = input_dir.join("types.json");
         if types_path.exists() {
-            let types_content =
-                fs::read_to_string(&types_path).map_err(|e| GeneratorError::Io(e))?;
+            let types_content = fs::read_to_string(&types_path).map_err(GeneratorError::Io)?;
             if let Ok(types) =
                 serde_json::from_str::<Vec<crate::parser::vk_types::TypeDefinition>>(&types_content)
             {
@@ -335,10 +340,10 @@ impl GeneratorModule for FunctionGenerator {
 
         // Read function definitions
         let input_path = input_dir.join("functions.json");
-        let input_content = fs::read_to_string(input_path).map_err(|e| GeneratorError::Io(e))?;
+        let input_content = fs::read_to_string(input_path).map_err(GeneratorError::Io)?;
 
         let functions: Vec<FunctionDefinition> =
-            serde_json::from_str(&input_content).map_err(|e| GeneratorError::Json(e))?;
+            serde_json::from_str(&input_content).map_err(GeneratorError::Json)?;
 
         // Generate command function pointer typedefs
         for func_def in &functions {
@@ -350,7 +355,7 @@ impl GeneratorModule for FunctionGenerator {
 
         // Write output file
         let output_path = output_dir.join(self.output_file());
-        fs::write(output_path, generated_code).map_err(|e| GeneratorError::Io(e))?;
+        fs::write(output_path, generated_code).map_err(GeneratorError::Io)?;
 
         crate::codegen::logging::log_info(&format!(
             "FunctionGeneratorModule: Generated {} function signatures",

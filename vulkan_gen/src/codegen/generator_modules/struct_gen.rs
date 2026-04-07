@@ -25,7 +25,7 @@ fn sanitize_type_name(name: &str) -> String {
         }
     }
     // Prevent leading digits
-    if s.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+    if s.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         s = format!("_{}", s);
     }
     s
@@ -33,6 +33,12 @@ fn sanitize_type_name(name: &str) -> String {
 
 /// Generator module for Vulkan structs
 pub struct StructGenerator;
+
+impl Default for StructGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl StructGenerator {
     pub fn new() -> Self {
@@ -312,7 +318,7 @@ impl StructGenerator {
 
                 // Use unsafe zeroed for all array defaults since array elements
                 // may be complex types (structs, enums) that don't implement Default
-                return format!("unsafe {{ std::mem::zeroed() }}");
+                return "unsafe { std::mem::zeroed() }".to_string();
             }
         }
 
@@ -387,11 +393,10 @@ impl StructGenerator {
             if let Some(first_name) = first_non_alias {
                 // Format the variant name the same way the enum generator does:
                 // strip leading "VK_" prefix.
-                let variant = if first_name.starts_with("VK_") {
-                    first_name[3..].to_string()
-                } else {
-                    first_name.to_string()
-                };
+                let variant = first_name
+                    .strip_prefix("VK_")
+                    .unwrap_or(first_name)
+                    .to_string();
                 map.insert(e.name.clone(), variant);
             }
         }
@@ -407,7 +412,7 @@ impl StructGenerator {
     ) -> GeneratorResult<()> {
         // Read input file
         let input_path = input_dir.join("structs.json");
-        let input_content = fs::read_to_string(&input_path).map_err(|e| GeneratorError::Io(e))?;
+        let input_content = fs::read_to_string(&input_path).map_err(GeneratorError::Io)?;
 
         // Parse JSON - try direct array format first, then fallback to object-with-array { "structs": [...] }
         let structs: Vec<StructDefinition> =
@@ -419,8 +424,8 @@ impl StructGenerator {
                         structs: Vec<StructDefinition>,
                     }
 
-                    let wrapper: StructsFile = serde_json::from_str(&input_content)
-                        .map_err(|e| GeneratorError::Json(e))?;
+                    let wrapper: StructsFile =
+                        serde_json::from_str(&input_content).map_err(GeneratorError::Json)?;
                     wrapper.structs
                 }
             };
@@ -450,11 +455,11 @@ impl StructGenerator {
         }
 
         // Ensure output directory exists
-        fs::create_dir_all(output_dir).map_err(|e| GeneratorError::Io(e))?;
+        fs::create_dir_all(output_dir).map_err(GeneratorError::Io)?;
 
         // Write output file
         let output_path = output_dir.join("structs.rs");
-        fs::write(output_path, generated_code).map_err(|e| GeneratorError::Io(e))?;
+        fs::write(output_path, generated_code).map_err(GeneratorError::Io)?;
 
         crate::codegen::logging::log_info(&format!(
             "StructGeneratorModule: Generated {} structs",

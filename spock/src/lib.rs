@@ -41,7 +41,20 @@
 //!    VK_VERSION=1.3.250 cargo build -p spock --features fetch-spec
 //!    ```
 //!
-//! ## Usage
+//! ## Two API surfaces
+//!
+//! Spock exposes Vulkan through two complementary modules:
+//!
+//! - [`raw`] — direct FFI bindings. Every Vulkan type, struct, enum, and
+//!   function pointer, exactly as the spec defines them. Use this for
+//!   maximum control or to interoperate with code that needs raw handles.
+//!
+//! - [`safe`] — RAII wrappers with `Drop` impls and `Result`-based error
+//!   handling. Currently covers the core compute path: instances, devices,
+//!   queues, buffers, memory, command pools, command buffers, and fences.
+//!   Use this for ergonomic Rust code without manual `vkDestroy*` calls.
+//!
+//! ## Raw API example
 //!
 //! ```rust,ignore
 //! use spock::raw::bindings::*;
@@ -57,14 +70,44 @@
 //! };
 //! ```
 //!
+//! ## Safe API example
+//!
+//! ```rust,no_run
+//! use spock::safe::{Instance, InstanceCreateInfo, ApiVersion};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let instance = Instance::new(InstanceCreateInfo {
+//!     application_name: Some("my-app"),
+//!     api_version: ApiVersion::V1_0,
+//!     ..Default::default()
+//! })?;
+//!
+//! for pd in instance.enumerate_physical_devices()? {
+//!     println!("Found GPU: {}", pd.properties().device_name());
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! The instance, devices, buffers, and command pools are all dropped
+//! automatically — no manual `vkDestroy*` calls.
+//!
 //! ## Safety
 //!
-//! All Vulkan functions are `unsafe` as they directly expose the C API.
+//! Functions in [`raw`] are `unsafe` as they directly expose the C API.
 //! Users are responsible for parameter validation, memory management,
 //! thread safety, and Vulkan object lifecycle management.
+//!
+//! The [`safe`] module wraps these to provide RAII cleanup and bounds-
+//! checked operations, but Vulkan still has many cross-call requirements
+//! (e.g., synchronization between submissions) that are the user's
+//! responsibility.
 
 // Re-export all raw bindings
 pub mod raw;
+
+// Safe RAII wrapper module
+pub mod safe;
 
 // Re-export commonly used items at crate root for convenience
 pub use raw::bindings::*;

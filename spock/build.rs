@@ -97,7 +97,7 @@ fn resolve_vk_xml(
     #[cfg(feature = "fetch-spec")]
     {
         let version = env::var("VK_VERSION").ok();
-        return download_vk_xml(out_dir, version.as_deref());
+        download_vk_xml(out_dir, version.as_deref())
     }
 
     #[cfg(not(feature = "fetch-spec"))]

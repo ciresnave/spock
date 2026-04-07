@@ -11,6 +11,12 @@ use crate::parser::vk_types::PlatformDefinition;
 /// Generator module for Vulkan platforms
 pub struct PlatformGenerator;
 
+impl Default for PlatformGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlatformGenerator {
     pub fn new() -> Self {
         Self
@@ -152,11 +158,11 @@ impl GeneratorModule for PlatformGenerator {
     fn generate(&self, input_dir: &Path, output_dir: &Path) -> GeneratorResult<()> {
         // Read input file
         let input_path = input_dir.join("platforms.json");
-        let input_content = fs::read_to_string(input_path).map_err(|e| GeneratorError::Io(e))?;
+        let input_content = fs::read_to_string(input_path).map_err(GeneratorError::Io)?;
 
         // Parse JSON - direct array format
         let platforms: Vec<PlatformDefinition> =
-            serde_json::from_str(&input_content).map_err(|e| GeneratorError::Json(e))?;
+            serde_json::from_str(&input_content).map_err(GeneratorError::Json)?;
 
         // Generate code
         let mut generated_code = String::new();
@@ -177,7 +183,7 @@ impl GeneratorModule for PlatformGenerator {
 
         // Write output file
         let output_path = output_dir.join(self.output_file());
-        fs::write(output_path, generated_code).map_err(|e| GeneratorError::Io(e))?;
+        fs::write(output_path, generated_code).map_err(GeneratorError::Io)?;
 
         crate::codegen::logging::log_info(&format!(
             "PlatformGenerator: Generated {} platform definitions",

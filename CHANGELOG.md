@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial public release of spock — raw Vulkan API bindings generated entirely from the official `vk.xml` specification.
+- Initial public release of spock — Vulkan API bindings generated entirely from the official `vk.xml` specification.
+- **Safe wrapper module** (`spock::safe`) — RAII wrappers covering the core compute path: `Instance`, `PhysicalDevice`, `Device`, `Queue`, `Buffer`, `DeviceMemory` (with `MappedMemory`), `CommandPool`, `CommandBuffer`, and `Fence`. Every handle is destroyed automatically via `Drop`. No manual `vkDestroy*` calls.
+- **`fill_buffer` example** that exercises the entire safe wrapper end-to-end on a real GPU using `vkCmdFillBuffer`.
+- **Lavapipe integration in CI** — Linux runners install Mesa's software Vulkan implementation so the real-Vulkan integration tests actually exercise the loader on every CI run.
+- **Strict clippy on CI** — `cargo clippy --workspace -- -D warnings` is enforced.
 - Tree-based XML parser using `roxmltree` that correctly extracts nested struct members and command parameters.
 - Code generator producing `#[repr(C)]` structs with correct pointer/array/const field types.
 - Code generator producing `#[repr(i32)]` enums with extension values merged into base enums.
@@ -55,8 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No builder pattern helpers (`VkInstanceCreateInfo::builder()...`). Use the
   `..Default::default()` shorthand above instead. Builder generation is on the
   roadmap but adds significant generated-code volume.
-- No safe wrapper layer. Spock provides raw FFI bindings; building a safe API
-  on top is intentionally left as a separate concern.
-- Cross-platform CI runs build and unit tests on Linux/macOS/Windows, but the
-  real-Vulkan integration test only runs on developer machines with a Vulkan
-  driver installed (it skips gracefully elsewhere).
+- The safe wrapper module covers the **core compute path** (instance, device,
+  queue, buffer, memory, command pool, command buffer, fence) but does not yet
+  cover graphics-specific functionality: swapchains, render passes, pipelines,
+  images, samplers, descriptor sets, or SPIR-V compute shader dispatch. Use
+  `spock::raw` for those use cases.
+- The real-Vulkan integration tests run on Linux CI runners via Lavapipe
+  (Mesa's software rasterizer). Windows and macOS CI runners don't have a
+  Vulkan ICD by default, so the integration tests skip gracefully there.

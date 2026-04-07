@@ -11,6 +11,12 @@ use super::{GeneratorError, GeneratorMetadata, GeneratorModule, GeneratorResult}
 /// Generator module for Vulkan macros (Fixed Version)
 pub struct MacroGenerator;
 
+impl Default for MacroGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MacroGenerator {
     pub fn new() -> Self {
         Self
@@ -539,11 +545,7 @@ impl MacroGenerator {
 
         // Skip whitespace and the macro name
         let trimmed = after_define.trim_start();
-        let after_name = if let Some(rest) = trimmed.strip_prefix(name) {
-            rest
-        } else {
-            return None;
-        };
+        let after_name = trimmed.strip_prefix(name)?;
 
         // Find the parameter list: (param1, param2, ...)
         let paren_start = after_name.find('(')?;
@@ -706,8 +708,8 @@ impl MacroGenerator {
                     continue;
                 }
                 // Strip C suffixes
-                let clean = value.trim_end_matches(|c: char| matches!(c, 'U' | 'u' | 'L' | 'l'));
-                if let Ok(_) = clean.parse::<u64>() {
+                let clean = value.trim_end_matches(['U', 'u', 'L', 'l']);
+                if clean.parse::<u64>().is_ok() {
                     best_value = Some(clean.to_string());
                     // Don't break — prefer later (more unconditional) definitions
                 }

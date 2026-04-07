@@ -39,6 +39,10 @@
 use crate::raw::bindings::VkResult;
 
 /// Extension trait that converts `VkResult` into a Rust `Result`.
+///
+/// `VkResult` is `#[repr(i32)]` and `Copy`, so the extension methods take
+/// `self` by value rather than `&self`.
+#[allow(clippy::wrong_self_convention)]
 pub trait VkResultExt {
     /// Convert `VkResult::SUCCESS` to `Ok(())` and any other value to `Err(self)`.
     fn into_result(self) -> Result<(), VkResult>;

@@ -148,7 +148,9 @@ fn merge_extension_enum_values(spec: &mut VulkanSpecification) {
                     None => continue, // Not extending any enum
                 };
 
-                // Compute the value
+                // Compute the value. Note: bitpos values and alias references
+                // are stored in the EnumValue struct's separate fields, not in
+                // `value`, so we leave `value` as None for those cases.
                 let value = if let Some(v) = &item.value {
                     Some(v.clone())
                 } else if let Some(offset) = &item.offset {
@@ -158,10 +160,8 @@ fn merge_extension_enum_values(spec: &mut VulkanSpecification) {
                         offset,
                         item.dir.as_deref(),
                     ))
-                } else if item.bitpos.is_some() {
-                    None // bitpos is stored separately
-                } else if item.alias.is_some() {
-                    None // alias is stored separately
+                } else if item.bitpos.is_some() || item.alias.is_some() {
+                    None
                 } else {
                     continue;
                 };

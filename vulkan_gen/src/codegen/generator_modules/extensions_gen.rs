@@ -11,6 +11,12 @@ use super::{GeneratorError, GeneratorMetadata, GeneratorModule, GeneratorResult}
 /// Generator module for Vulkan extensions
 pub struct ExtensionGenerator;
 
+impl Default for ExtensionGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExtensionGenerator {
     pub fn new() -> Self {
         Self

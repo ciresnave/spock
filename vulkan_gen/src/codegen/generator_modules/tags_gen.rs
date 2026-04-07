@@ -11,6 +11,12 @@ use crate::parser::vk_types::TagDefinition;
 /// Generator module for Vulkan vendor tags
 pub struct TagGenerator;
 
+impl Default for TagGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TagGenerator {
     pub fn new() -> Self {
         Self
@@ -167,11 +173,11 @@ impl GeneratorModule for TagGenerator {
     fn generate(&self, input_dir: &Path, output_dir: &Path) -> GeneratorResult<()> {
         // Read input file
         let input_path = input_dir.join("tags.json");
-        let input_content = fs::read_to_string(input_path).map_err(|e| GeneratorError::Io(e))?;
+        let input_content = fs::read_to_string(input_path).map_err(GeneratorError::Io)?;
 
         // Parse JSON - direct array format
         let tags: Vec<TagDefinition> =
-            serde_json::from_str(&input_content).map_err(|e| GeneratorError::Json(e))?;
+            serde_json::from_str(&input_content).map_err(GeneratorError::Json)?;
 
         // Generate code
         let mut generated_code = String::new();
@@ -192,7 +198,7 @@ impl GeneratorModule for TagGenerator {
 
         // Write output file
         let output_path = output_dir.join(self.output_file());
-        fs::write(output_path, generated_code).map_err(|e| GeneratorError::Io(e))?;
+        fs::write(output_path, generated_code).map_err(GeneratorError::Io)?;
 
         crate::codegen::logging::log_info(&format!(
             "TagGenerator: Generated {} tag definitions",

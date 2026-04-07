@@ -20,7 +20,7 @@ fn sanitize_type_name(name: &str) -> String {
         }
     }
     // Prevent leading digits
-    if s.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+    if s.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         s = format!("_{}", s);
     }
     s
@@ -28,6 +28,12 @@ fn sanitize_type_name(name: &str) -> String {
 
 /// Generator module for Vulkan type aliases
 pub struct TypeGenerator;
+
+impl Default for TypeGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl TypeGenerator {
     pub fn new() -> Self {
@@ -254,7 +260,7 @@ impl TypeGenerator {
         match type_def.category.as_str() {
             "basetype" => {
                 // Skip basetypes with preprocessor directives (Objective-C types)
-                if type_def.definition.as_deref().map_or(false, |d| {
+                if type_def.definition.as_deref().is_some_and(|d| {
                     d.contains("#ifdef")
                         || d.contains("#if")
                         || d.contains("@class")
@@ -276,7 +282,7 @@ impl TypeGenerator {
                     let is_ptr = type_def
                         .definition
                         .as_deref()
-                        .map_or(false, |d| d.contains('*'));
+                        .is_some_and(|d| d.contains('*'));
                     if is_ptr {
                         format!("*mut {}", mapped)
                     } else {
@@ -285,7 +291,7 @@ impl TypeGenerator {
                 } else if type_def
                     .definition
                     .as_deref()
-                    .map_or(false, |d| d.contains("struct"))
+                    .is_some_and(|d| d.contains("struct"))
                 {
                     // Opaque struct declaration (e.g., struct ANativeWindow;)
                     "*mut c_void".to_string()
@@ -301,7 +307,7 @@ impl TypeGenerator {
                     .definition
                     .as_deref()
                     .or(Some(&type_def.raw_content))
-                    .map_or(false, |d| d.contains("NON_DISPATCHABLE"));
+                    .is_some_and(|d| d.contains("NON_DISPATCHABLE"));
                 if is_non_dispatchable {
                     code.push_str(&format!("pub type {} = u64;\n\n", sanitized_name));
                 } else {
@@ -314,7 +320,7 @@ impl TypeGenerator {
                     .definition
                     .as_deref()
                     .or(Some(&type_def.raw_content))
-                    .map_or(false, |d| d.contains("VkFlags64") || d.contains("uint64_t"));
+                    .is_some_and(|d| d.contains("VkFlags64") || d.contains("uint64_t"));
                 let rust_type = if is_64 { "u64" } else { "u32" };
                 code.push_str(&format!("pub type {} = {};\n\n", sanitized_name, rust_type));
             }
@@ -413,7 +419,9 @@ impl TypeGenerator {
             let (ret_base, _ret_const, _ret_ptr) = Self::analyze_type_tokens(ret);
             let rust_ret = self.map_type_to_rust(&ret_base);
 
-            // Parse parameters
+            // Parse parameters. Hoist the identifier regex out of the loop
+            // so we don't recompile it on every parameter.
+            let ident_re = Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap();
             let mut rust_params = Vec::new();
             let mut arg_index: usize = 0;
             for raw_p in params.split(',') {
@@ -429,10 +437,7 @@ impl TypeGenerator {
                 if toks.len() >= 2 {
                     let last = toks[toks.len() - 1];
                     // If the last token looks like an identifier (param name), treat as name
-                    if Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$")
-                        .unwrap()
-                        .is_match(last)
-                    {
+                    if ident_re.is_match(last) {
                         maybe_name = Some(last);
                         type_tokens = toks[..toks.len() - 1].to_vec();
                     }
@@ -518,7 +523,7 @@ impl TypeGenerator {
     fn generate_all_types(&self, input_dir: &Path, output_dir: &Path) -> GeneratorResult<()> {
         // Read input file
         let input_path = input_dir.join("types.json");
-        let input_content = fs::read_to_string(&input_path).map_err(|e| GeneratorError::Io(e))?;
+        let input_content = fs::read_to_string(&input_path).map_err(GeneratorError::Io)?;
 
         // Parse JSON - try array first, then object-with-array { "types": [...] }
         let types: Vec<TypeDefinition> =
@@ -530,8 +535,8 @@ impl TypeGenerator {
                         types: Vec<TypeDefinition>,
                     }
 
-                    let wrapper: TypesFile = serde_json::from_str(&input_content)
-                        .map_err(|e| GeneratorError::Json(e))?;
+                    let wrapper: TypesFile =
+                        serde_json::from_str(&input_content).map_err(GeneratorError::Json)?;
                     wrapper.types
                 }
             };
@@ -751,11 +756,11 @@ impl TypeGenerator {
         }
 
         // Ensure output directory exists
-        fs::create_dir_all(output_dir).map_err(|e| GeneratorError::Io(e))?;
+        fs::create_dir_all(output_dir).map_err(GeneratorError::Io)?;
 
         // Write output file
         let output_path = output_dir.join(self.output_file());
-        fs::write(output_path, generated_code).map_err(|e| GeneratorError::Io(e))?;
+        fs::write(output_path, generated_code).map_err(GeneratorError::Io)?;
 
         crate::codegen::logging::log_info(&format!(
             "TypeGeneratorModule: Generated {} type aliases",
