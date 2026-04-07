@@ -19,6 +19,8 @@ pub struct VulkanConstant {
     pub constant_type: String,
     pub raw_content: String,
     pub is_alias: bool,
+    #[serde(default)]
+    pub source_line: Option<usize>,
 }
 
 // ---- Enums ----
@@ -140,6 +142,8 @@ pub struct CommandParam {
     pub comment: Option<String>,
     pub definition: String,
     pub raw_content: String,
+    #[serde(default)]
+    pub source_line: Option<usize>,
 }
 
 // ---- Types (handles, bitmasks, basetypes, funcpointers) ----

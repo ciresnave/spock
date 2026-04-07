@@ -555,19 +555,32 @@ mod tests {
     fn test_default_values() {
         let generator = StructGenerator::new();
 
+        // Integer primitives default to 0
         assert_eq!(generator.get_default_value_for_rust_type("u32", false), "0");
-        assert_eq!(generator.get_default_value_for_rust_type("f32", false), "0");
+        // Float primitives default to 0.0 (NOT 0 — that would be a type error)
+        assert_eq!(
+            generator.get_default_value_for_rust_type("f32", false),
+            "0.0"
+        );
+        // Const pointers default to null
         assert_eq!(
             generator.get_default_value_for_rust_type("*const u32", true),
             "std::ptr::null()"
         );
+        // Mut pointers default to null_mut
+        assert_eq!(
+            generator.get_default_value_for_rust_type("*mut u32", true),
+            "std::ptr::null_mut()"
+        );
+        // Unknown types (Vulkan handles, structs) fall back to zeroed for FFI safety
         assert_eq!(
             generator.get_default_value_for_rust_type("VkDevice", false),
-            "Default::default()"
+            "unsafe { std::mem::zeroed() }"
         );
+        // Arrays use zeroed because element types may be complex
         assert_eq!(
             generator.get_default_value_for_rust_type("[c_char; 256]", false),
-            "[0; 256]"
+            "unsafe { std::mem::zeroed() }"
         );
     }
 }

@@ -461,6 +461,7 @@ fn parse_enums_block(node: roxmltree::Node, spec: &mut VulkanSpecification) {
                 constant_type: attr(enum_child, "type").unwrap_or_else(|| "enum".to_string()),
                 raw_content: raw_xml_content(enum_child),
                 is_alias,
+                source_line: None,
             });
         }
         return;
@@ -594,6 +595,7 @@ fn parse_command(node: roxmltree::Node, spec: &mut VulkanSpecification) {
             comment: attr(param_node, "comment"),
             definition,
             raw_content: raw_xml_content(param_node),
+            source_line: None,
         });
     }
 

@@ -48,7 +48,7 @@ jobs:
         # The real-Vulkan integration test gracefully skips when no driver
         # is installed (CI runners don't have GPU drivers), so this is safe
         # to run on all platforms.
-        run: cargo test -p spock --features fetch-spec
+        run: cargo test --workspace --features fetch-spec
 
       - name: Build example
         run: cargo build -p spock --features fetch-spec --example device_info
