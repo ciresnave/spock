@@ -1,0 +1,15 @@
+[package]
+name = "vulkan_gen"
+version = "0.1.0"
+edition = "2024"
+authors = ["Eric Evans <ciresnave@gmail.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ciresnave/spock"
+
+[dependencies]
+roxmltree = "0.21"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+regex = { workspace = true }
+tempfile = { workspace = true }

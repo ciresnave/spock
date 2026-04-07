@@ -1,0 +1,46 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+*.pdb
+
+# Profiling and coverage
+*.profraw
+*.profdata
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code agent state
+.claude/
+
+# Local intermediates from prior runs (no longer used)
+/intermediate/
+/intermediate_*/
+intermediate_test/
+**/tmp/
+
+# Vulkan spec download cache (we use OUT_DIR; ignore strays)
+vk-*.xml
+!spec/registry/Vulkan-Docs/xml/vk.xml
+
+# Logs and diagnostic dumps
+*.log
+debug_output.txt
+debug_structs.txt
+cargo_*_output.txt
+build_diagnostics.json
+build_errors.txt
+build_messages.json
+build_top_errors.json
+check-results*.txt
+test_vulkan_generation.rs

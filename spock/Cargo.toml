@@ -1,0 +1,31 @@
+[package]
+name = "spock"
+version = "0.1.0"
+edition = "2024"
+authors = ["Eric Evans <CireSnave@gmail.com>"]
+license = "MIT OR Apache-2.0"
+description = "Complete raw Vulkan API bindings for Rust, generated entirely from the official Vulkan XML specification"
+keywords = ["vulkan", "graphics", "gpu", "rendering", "ffi"]
+categories = ["graphics", "api-bindings", "rendering", "external-ffi-bindings"]
+readme = "../README.md"
+repository = "https://github.com/ciresnave/spock"
+
+[features]
+default = ["build-support"]
+# Build support for XML parsing and code generation during build
+build-support = []
+# Enable automatic download of vk.xml from the Khronos GitHub repository
+# when no local copy is found. Requires network access during build.
+fetch-spec = []
+
+[dependencies]
+# Dynamic loading of the Vulkan runtime library
+libloading = { workspace = true }
+
+[build-dependencies]
+vulkan_gen = { path = "../vulkan_gen" }
+ureq = "3"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

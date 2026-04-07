@@ -1,0 +1,74 @@
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   C:\Users\cires\OneDrive\Documents\projects\spock\spock\Cargo.toml
+workspace: C:\Users\cires\OneDrive\Documents\projects\spock\Cargo.toml
+warning: unused imports: `BytesEnd` and `BytesText`
+ --> vulkan_gen\src\parser\event_bus.rs:6:25
+  |
+6 | use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+  |                         ^^^^^^^^              ^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `XmlEventHandler`
+ --> vulkan_gen\src\vulkan_spec_parser.rs:5:45
+  |
+5 | use crate::parser::event_bus::{XmlEventBus, XmlEventHandler};
+  |                                             ^^^^^^^^^^^^^^^
+
+warning: structure field `requiresCore` should have a snake case name
+  --> vulkan_gen\src\parser\parsing_modules\extensions.rs:37:9
+   |
+37 |     pub requiresCore: Option<String>,
+   |         ^^^^^^^^^^^^ help: convert the identifier to snake case: `requires_core`
+   |
+   = note: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: `vulkan_gen` (lib) generated 3 warnings (run `cargo fix --lib -p vulkan_gen` to apply 2 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running `C:\Users\cires\OneDrive\Documents\projects\spock\target\debug\cherry_pick_verify_clean.exe`
+≡ƒìÆ Cherry-Pick Vulkan API Verification
+======================================
+≡ƒôû Analyzing: c:/Users/cires/OneDrive/Documents/projects/spock/spec/registry/Vulkan-Docs/xml/vk.xml
+Γ£à Direct XML parsing completed
+   Commands found: 754
+   Command aliases found: 0
+   Structs found: 1230
+   Enums found: 304
+   Bitmask flags found: 202
+   Extensions found: 630
+≡ƒôï Testing 21 cherry-picked commands
+≡ƒôï Testing 22 cherry-picked structs
+≡ƒôï Testing 15 cherry-picked enums
+≡ƒôï Testing 16 cherry-picked bitmask flags
+≡ƒôï Testing 18 cherry-picked extensions
+
+≡ƒôè Cherry-Pick Verification Results:
+   ≡ƒöº Commands:
+     Γ£à Found: 20
+     Γ¥î Missing: 1
+     Missing commands:
+       - vkGetAccelerationStructureBuildSizesNV
+   ≡ƒôª Structs:
+     Γ£à Found: 22
+     Γ¥î Missing: 0
+   ≡ƒöó Enums:
+     Γ£à Found: 13
+     Γ¥î Missing: 2
+     ≡ƒöä Duplicates: 0
+     Missing enums:
+       - VkAccelerationStructureTypeNV
+       - VkGeometryTypeNV
+   ≡ƒÅü Bitmask Flags:
+     Γ£à Found: 16
+     Γ¥î Missing: 0
+     ≡ƒöä Duplicates: 2
+   ≡ƒº⌐ Extensions:
+     Γ£à Found: 18
+     Γ¥î Missing: 0
+
+≡ƒÄ» Overall Assessment:
+   Missing elements: 3
+   Duplicate elements: 2
+   ΓÜá∩╕Å  Cherry-pick verification found issues
+   ≡ƒôë Missing elements suggest systematic parsing gaps
+   ≡ƒôè Duplicate elements suggest parsing logic errors
