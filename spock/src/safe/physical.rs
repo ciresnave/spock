@@ -198,9 +198,21 @@ impl PhysicalDevice {
     /// natively.
     ///
     /// Returns an empty `Vec` if the device does not expose
-    /// `VK_KHR_cooperative_matrix`. The extension must be enabled at
-    /// instance creation time for this query to succeed.
-    pub fn cooperative_matrix_properties(&self) -> Vec<CooperativeMatrixProperties> {
+    /// `VK_KHR_cooperative_matrix`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must have created the parent [`Instance`](super::Instance)
+    /// with `VK_KHR_cooperative_matrix` in
+    /// [`InstanceCreateInfo::enabled_extensions`](super::InstanceCreateInfo::enabled_extensions).
+    /// Calling this function when the extension was not enabled is
+    /// undefined behaviour on some implementations (notably software
+    /// rasterizers like Lavapipe), even though the function pointer may
+    /// have been loaded by the loader. The Vulkan loader will happily
+    /// hand back a stub for any KHR function name it knows about; the
+    /// stub may then crash when called against a device that doesn't
+    /// implement the extension.
+    pub unsafe fn cooperative_matrix_properties(&self) -> Vec<CooperativeMatrixProperties> {
         let Some(get) = self
             .instance
             .dispatch
