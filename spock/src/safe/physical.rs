@@ -26,6 +26,15 @@ impl PhysicalDevice {
         self.handle
     }
 
+    /// Returns a reference to the parent instance's dispatch table.
+    /// Used by [`Allocator`](super::Allocator) to look up
+    /// `vkGetPhysicalDeviceMemoryProperties`. Hidden from rustdoc — not
+    /// part of the stable public API.
+    #[doc(hidden)]
+    pub fn instance(&self) -> &VkInstanceDispatchTable {
+        &self.instance.dispatch
+    }
+
     /// Query the physical device's properties (name, vendor, API version, etc.).
     pub fn properties(&self) -> PhysicalDeviceProperties {
         let get = self

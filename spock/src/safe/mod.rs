@@ -73,6 +73,7 @@
 
 use crate::raw::bindings::VkResult;
 
+mod allocator;
 mod buffer;
 mod command;
 mod debug;
@@ -89,6 +90,9 @@ mod query;
 mod shader;
 mod sync;
 
+pub use allocator::{
+    Allocation, AllocationCreateInfo, AllocationStatistics, AllocationUsage, Allocator, HeapBudgets,
+};
 pub use buffer::{Buffer, BufferCreateInfo, BufferUsage};
 pub use command::{BufferCopy, CommandBuffer, CommandBufferRecording, CommandPool};
 pub use debug::{

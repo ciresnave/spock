@@ -4,14 +4,15 @@
 //! Skips gracefully on systems without Vulkan installed.
 
 use spock::safe::{
-    ApiVersion, Buffer, BufferCopy, BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool,
-    ComputePipeline, DEBUG_UTILS_EXTENSION, DebugMessage, DebugMessageSeverity, DescriptorPool,
-    DescriptorPoolSize, DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType,
-    DeviceCreateInfo, DeviceMemory, Fence, Format, Image, Image2dCreateInfo, ImageBarrier,
-    ImageLayout, ImageUsage, ImageView, Instance, InstanceCreateInfo, KHRONOS_VALIDATION_LAYER,
-    MemoryPropertyFlags, PipelineCache, PipelineLayout, PipelineStatisticsFlags, PushConstantRange,
-    QueryPool, QueueCreateInfo, QueueFlags, Semaphore, SemaphoreKind, ShaderModule,
-    ShaderStageFlags, SignalSemaphore, SpecializationConstants, WaitSemaphore,
+    AllocationCreateInfo, AllocationUsage, Allocator, ApiVersion, Buffer, BufferCopy,
+    BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool, ComputePipeline,
+    DEBUG_UTILS_EXTENSION, DebugMessage, DebugMessageSeverity, DescriptorPool, DescriptorPoolSize,
+    DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType, DeviceCreateInfo,
+    DeviceMemory, Fence, Format, Image, Image2dCreateInfo, ImageBarrier, ImageLayout, ImageUsage,
+    ImageView, Instance, InstanceCreateInfo, KHRONOS_VALIDATION_LAYER, MemoryPropertyFlags,
+    PipelineCache, PipelineLayout, PipelineStatisticsFlags, PushConstantRange, QueryPool,
+    QueueCreateInfo, QueueFlags, Semaphore, SemaphoreKind, ShaderModule, ShaderStageFlags,
+    SignalSemaphore, SpecializationConstants, WaitSemaphore,
 };
 
 #[test]
@@ -1731,4 +1732,269 @@ fn test_sync2_memory_barrier_when_supported() {
             eprintln!("SKIP: sync2 not supported: {e}");
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Sub-allocator (Allocator) integration tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_allocator_creation_and_statistics_start_zero() {
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+    let alloc = Allocator::new(&device, &physical).unwrap();
+    let stats = alloc.statistics();
+    assert_eq!(stats.allocation_bytes, 0);
+    assert_eq!(stats.allocation_count, 0);
+    assert_eq!(stats.block_bytes, 0);
+    assert_eq!(stats.block_count, 0);
+}
+
+#[test]
+fn test_allocator_create_buffer_pool_path() {
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+    let allocator = Allocator::new(&device, &physical).unwrap();
+
+    let (buffer, allocation) = allocator
+        .create_buffer(
+            BufferCreateInfo {
+                size: 4096,
+                usage: BufferUsage::STORAGE_BUFFER,
+            },
+            AllocationCreateInfo {
+                usage: AllocationUsage::HostVisible,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert!(allocation.size() >= 4096);
+    assert!(allocation.memory() != 0);
+
+    let stats = allocator.statistics();
+    assert_eq!(stats.allocation_count, 1);
+    assert!(stats.allocation_bytes >= 4096);
+    assert!(stats.block_count >= 1);
+
+    allocator.free(allocation);
+    drop(buffer);
+
+    let stats = allocator.statistics();
+    assert_eq!(stats.allocation_count, 0);
+    assert_eq!(stats.allocation_bytes, 0);
+    // Block stays around — pool keeps the underlying VkDeviceMemory until
+    // the Allocator drops.
+    assert!(stats.block_count >= 1);
+}
+
+#[test]
+fn test_allocator_many_buffers_share_one_block() {
+    // Allocating many small buffers should reuse the same underlying
+    // VkDeviceMemory block — the whole point of sub-allocation.
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+    let allocator = Allocator::new(&device, &physical).unwrap();
+
+    let mut buffers = Vec::new();
+    let mut allocations = Vec::new();
+    let mut last_memory_handle = 0u64;
+    let mut shared_count = 0u32;
+    for _ in 0..32 {
+        let (b, a) = allocator
+            .create_buffer(
+                BufferCreateInfo {
+                    size: 1024,
+                    usage: BufferUsage::STORAGE_BUFFER,
+                },
+                AllocationCreateInfo {
+                    usage: AllocationUsage::HostVisible,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        if a.memory() == last_memory_handle {
+            shared_count += 1;
+        }
+        last_memory_handle = a.memory();
+        buffers.push(b);
+        allocations.push(a);
+    }
+
+    // Most buffers should share the same VkDeviceMemory.
+    assert!(
+        shared_count >= 28,
+        "expected at least 28 shared, got {shared_count}"
+    );
+
+    let stats = allocator.statistics();
+    assert_eq!(stats.allocation_count, 32);
+    // We should have only one block for all 32 small allocations.
+    assert!(
+        stats.block_count <= 2,
+        "expected <=2 blocks for 32 small allocations, got {}",
+        stats.block_count
+    );
+
+    for a in allocations.drain(..) {
+        allocator.free(a);
+    }
+    drop(buffers);
+}
+
+#[test]
+fn test_allocator_dedicated_for_huge_buffer() {
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+    let allocator = Allocator::new(&device, &physical).unwrap();
+
+    // Force the dedicated path with the explicit flag.
+    let (buffer, alloc) = allocator
+        .create_buffer(
+            BufferCreateInfo {
+                size: 4096,
+                usage: BufferUsage::STORAGE_BUFFER,
+            },
+            AllocationCreateInfo {
+                usage: AllocationUsage::HostVisible,
+                dedicated: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(alloc.offset(), 0);
+
+    let stats = allocator.statistics();
+    assert_eq!(stats.dedicated_allocation_count, 1);
+
+    allocator.free(alloc);
+    drop(buffer);
+    let stats = allocator.statistics();
+    assert_eq!(stats.dedicated_allocation_count, 0);
+}
+
+#[test]
+fn test_allocator_create_image_2d_via_pool() {
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+    let allocator = Allocator::new(&device, &physical).unwrap();
+
+    let (image, alloc) = allocator
+        .create_image_2d(
+            Image2dCreateInfo {
+                format: Format::R32_UINT,
+                width: 32,
+                height: 32,
+                usage: ImageUsage::STORAGE,
+            },
+            AllocationCreateInfo {
+                usage: AllocationUsage::DeviceLocal,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(alloc.size() >= 32 * 32 * 4);
+    let _view = ImageView::new_2d_color(&image).unwrap();
+
+    allocator.free(alloc);
+    drop(image);
+}
+
+#[test]
+fn test_allocator_persistent_mapped_pointer() {
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+    let allocator = Allocator::new(&device, &physical).unwrap();
+
+    let (buffer, alloc) = allocator
+        .create_buffer(
+            BufferCreateInfo {
+                size: 256,
+                usage: BufferUsage::TRANSFER_DST,
+            },
+            AllocationCreateInfo {
+                usage: AllocationUsage::HostVisible,
+                mapped: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let ptr = alloc
+        .mapped_ptr()
+        .expect("HostVisible + mapped should give a pointer");
+    // Write a pattern via the persistent mapping. Safety: pointer is
+    // valid for the size of the allocation, and host-coherent so no
+    // explicit flush is needed.
+    unsafe {
+        let bytes = std::slice::from_raw_parts_mut(ptr as *mut u8, alloc.size() as usize);
+        for (i, b) in bytes.iter_mut().enumerate() {
+            *b = (i & 0xFF) as u8;
+        }
+        // Read back via a fresh slice from the same pointer.
+        let bytes = std::slice::from_raw_parts(ptr as *const u8, alloc.size() as usize);
+        for (i, &b) in bytes.iter().enumerate() {
+            assert_eq!(b, (i & 0xFF) as u8);
+        }
+    }
+
+    allocator.free(alloc);
+    drop(buffer);
+}
+
+#[test]
+fn test_allocator_peak_bytes_tracks_high_watermark() {
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+    let allocator = Allocator::new(&device, &physical).unwrap();
+
+    let (b1, a1) = allocator
+        .create_buffer(
+            BufferCreateInfo {
+                size: 8 * 1024,
+                usage: BufferUsage::STORAGE_BUFFER,
+            },
+            AllocationCreateInfo {
+                usage: AllocationUsage::HostVisible,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let (b2, a2) = allocator
+        .create_buffer(
+            BufferCreateInfo {
+                size: 16 * 1024,
+                usage: BufferUsage::STORAGE_BUFFER,
+            },
+            AllocationCreateInfo {
+                usage: AllocationUsage::HostVisible,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    let peak_after_two = allocator.statistics().peak_allocation_bytes;
+    assert!(peak_after_two >= 24 * 1024);
+
+    allocator.free(a2);
+    drop(b2);
+    let peak_after_one_freed = allocator.statistics().peak_allocation_bytes;
+    // Peak does not regress when one is freed.
+    assert_eq!(peak_after_two, peak_after_one_freed);
+
+    allocator.free(a1);
+    drop(b1);
 }
