@@ -36,8 +36,8 @@
 //! [`spock::raw`](crate::raw) for those use cases.
 //!
 //! Compiling shaders is left to the user; spock takes SPIR-V as `&[u32]`.
-//! With the optional `naga` feature enabled, [`naga::compile_glsl`] provides
-//! a convenience function for compiling GLSL at runtime via the
+//! With the optional `naga` feature enabled, `safe::naga::compile_glsl`
+//! provides a convenience function for compiling GLSL at runtime via the
 //! [`naga`](https://docs.rs/naga) crate.
 //!
 //! # Example

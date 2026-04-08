@@ -13,7 +13,7 @@ use std::sync::Arc;
 /// - Pre-compile GLSL with `glslc -O shader.comp -o shader.spv` and load
 ///   the resulting bytes into a `&[u32]`.
 /// - Use the optional `naga` Cargo feature to compile GLSL at runtime via
-///   [`crate::safe::naga::compile_glsl`].
+///   `safe::naga::compile_glsl`.
 /// - Use any other SPIR-V producer (rust-gpu, slang, etc.) — spock takes
 ///   any valid SPIR-V word slice.
 ///
