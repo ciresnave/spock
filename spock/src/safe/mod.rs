@@ -91,6 +91,8 @@ mod pipeline;
 mod query;
 mod render_pass;
 mod shader;
+mod surface;
+mod swapchain;
 mod sync;
 
 pub use allocator::{
@@ -137,6 +139,12 @@ pub use render_pass::{
     RenderPassCreateInfo,
 };
 pub use shader::ShaderModule;
+pub use surface::{
+    EXT_METAL_SURFACE_EXTENSION, KHR_SURFACE_EXTENSION, KHR_SWAPCHAIN_EXTENSION,
+    KHR_WAYLAND_SURFACE_EXTENSION, KHR_WIN32_SURFACE_EXTENSION, PresentMode, Surface,
+    SurfaceCapabilities, SurfaceFormat,
+};
+pub use swapchain::{Swapchain, SwapchainCreateInfo};
 pub use sync::{Fence, Semaphore, SemaphoreKind};
 
 /// Error type returned by all fallible operations in [`spock::safe`](crate::safe).

@@ -261,6 +261,17 @@ fn parse_struct_or_union(node: roxmltree::Node, category: &str, spec: &mut Vulka
         .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "member")
     {
+        // Filter on `api` attribute the same way commands do — vk.xml
+        // sometimes lists the same struct member twice for the desktop
+        // Vulkan profile vs Vulkan SC. Skip non-desktop entries.
+        if let Some(api) = attr(member_node, "api") {
+            let included = api
+                .split(',')
+                .any(|s| matches!(s.trim(), "vulkan" | "vulkanbase"));
+            if !included {
+                continue;
+            }
+        }
         let member_name = child_element_text(member_node, "name").unwrap_or_default();
         let type_name = child_element_text(member_node, "type").unwrap_or_default();
         let definition = reconstruct_definition(member_node);
@@ -575,6 +586,21 @@ fn parse_command(node: roxmltree::Node, spec: &mut VulkanSpecification) {
         .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "param")
     {
+        // Filter on `api` attribute: vk.xml sometimes lists the same
+        // parameter twice for the desktop Vulkan profile vs Vulkan SC
+        // (Safety Critical). spock targets desktop Vulkan, so skip
+        // entries explicitly tagged for a non-desktop profile. Entries
+        // with no `api` attribute apply to all profiles and are kept.
+        if let Some(api) = attr(param_node, "api") {
+            // The attribute is a comma-separated list. Keep the param
+            // only if it lists "vulkan" or "vulkanbase".
+            let included = api
+                .split(',')
+                .any(|s| matches!(s.trim(), "vulkan" | "vulkanbase"));
+            if !included {
+                continue;
+            }
+        }
         let param_name = child_element_text(param_node, "name").unwrap_or_default();
         let type_name = child_element_text(param_node, "type").unwrap_or_default();
         let definition = reconstruct_definition(param_node);
