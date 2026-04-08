@@ -2,6 +2,7 @@
 
 use super::descriptor::{DescriptorSet, ShaderStageFlags};
 use super::device::DeviceInner;
+use super::image::{BufferImageCopy, Image, ImageBarrier};
 use super::pipeline::{ComputePipeline, PipelineLayout};
 use super::query::QueryPool;
 use super::{Buffer, Device, Error, Result, check};
@@ -376,6 +377,129 @@ impl<'a> CommandBufferRecording<'a> {
         // Safety: command buffer is in recording state, pool is valid,
         // query slot must be in bounds (caller's responsibility).
         unsafe { cmd(self.buffer.handle, pipeline_stage, pool.handle, query) };
+    }
+
+    /// Record an image memory barrier (one-image, color-aspect, single-mip,
+    /// single-layer). This is the simplified path that compute storage
+    /// images use for layout transitions like
+    /// `UNDEFINED -> GENERAL` (before writing) or
+    /// `GENERAL -> TRANSFER_SRC_OPTIMAL` (before reading back).
+    ///
+    /// `src_stage` and `dst_stage` are `VK_PIPELINE_STAGE_*` bit masks; the
+    /// `src_access` and `dst_access` fields on [`ImageBarrier`] are
+    /// `VK_ACCESS_*` bit masks.
+    pub fn image_barrier(&mut self, src_stage: u32, dst_stage: u32, barrier: ImageBarrier<'_>) {
+        let cmd = self
+            .buffer
+            .device
+            .dispatch
+            .vkCmdPipelineBarrier
+            .expect("vkCmdPipelineBarrier is required by Vulkan 1.0");
+
+        let raw = VkImageMemoryBarrier {
+            sType: VkStructureType::STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            srcAccessMask: barrier.src_access,
+            dstAccessMask: barrier.dst_access,
+            oldLayout: barrier.old_layout.0,
+            newLayout: barrier.new_layout.0,
+            srcQueueFamilyIndex: !0u32, // VK_QUEUE_FAMILY_IGNORED
+            dstQueueFamilyIndex: !0u32,
+            image: barrier.image.handle,
+            subresourceRange: VkImageSubresourceRange {
+                aspectMask: IMAGE_ASPECT_COLOR_BIT,
+                baseMipLevel: 0,
+                levelCount: 1,
+                baseArrayLayer: 0,
+                layerCount: 1,
+            },
+            ..Default::default()
+        };
+
+        // Safety: command buffer is in recording state, raw outlives the call.
+        unsafe {
+            cmd(
+                self.buffer.handle,
+                src_stage,
+                dst_stage,
+                0,
+                0,
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                1,
+                &raw,
+            )
+        };
+    }
+
+    /// Record `vkCmdCopyBufferToImage`: copy bytes from a buffer into one
+    /// or more regions of an image. The image must be in
+    /// `TRANSFER_DST_OPTIMAL` (or `GENERAL`) layout.
+    pub fn copy_buffer_to_image(
+        &mut self,
+        src: &Buffer,
+        dst: &Image,
+        dst_layout: super::ImageLayout,
+        regions: &[BufferImageCopy],
+    ) {
+        debug_assert!(
+            !regions.is_empty(),
+            "vkCmdCopyBufferToImage requires at least one region"
+        );
+        let cmd = self
+            .buffer
+            .device
+            .dispatch
+            .vkCmdCopyBufferToImage
+            .expect("vkCmdCopyBufferToImage is required by Vulkan 1.0");
+
+        let raw: Vec<VkBufferImageCopy> = regions.iter().map(|r| r.to_raw()).collect();
+        // Safety: handles are valid, raw outlives the call.
+        unsafe {
+            cmd(
+                self.buffer.handle,
+                src.handle,
+                dst.handle,
+                dst_layout.0,
+                raw.len() as u32,
+                raw.as_ptr(),
+            )
+        };
+    }
+
+    /// Record `vkCmdCopyImageToBuffer`: copy bytes from one or more image
+    /// regions into a buffer. The image must be in `TRANSFER_SRC_OPTIMAL`
+    /// (or `GENERAL`) layout.
+    pub fn copy_image_to_buffer(
+        &mut self,
+        src: &Image,
+        src_layout: super::ImageLayout,
+        dst: &Buffer,
+        regions: &[BufferImageCopy],
+    ) {
+        debug_assert!(
+            !regions.is_empty(),
+            "vkCmdCopyImageToBuffer requires at least one region"
+        );
+        let cmd = self
+            .buffer
+            .device
+            .dispatch
+            .vkCmdCopyImageToBuffer
+            .expect("vkCmdCopyImageToBuffer is required by Vulkan 1.0");
+
+        let raw: Vec<VkBufferImageCopy> = regions.iter().map(|r| r.to_raw()).collect();
+        // Safety: handles are valid, raw outlives the call.
+        unsafe {
+            cmd(
+                self.buffer.handle,
+                src.handle,
+                src_layout.0,
+                dst.handle,
+                raw.len() as u32,
+                raw.as_ptr(),
+            )
+        };
     }
 
     /// Record a global memory barrier between two pipeline stages.

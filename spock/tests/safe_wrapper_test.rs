@@ -4,10 +4,11 @@
 //! Skips gracefully on systems without Vulkan installed.
 
 use spock::safe::{
-    ApiVersion, Buffer, BufferCopy, BufferCreateInfo, BufferUsage, CommandPool, ComputePipeline,
-    DEBUG_UTILS_EXTENSION, DebugMessage, DebugMessageSeverity, DescriptorPool, DescriptorPoolSize,
-    DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType, DeviceCreateInfo,
-    DeviceMemory, Fence, Instance, InstanceCreateInfo, KHRONOS_VALIDATION_LAYER,
+    ApiVersion, Buffer, BufferCopy, BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool,
+    ComputePipeline, DEBUG_UTILS_EXTENSION, DebugMessage, DebugMessageSeverity, DescriptorPool,
+    DescriptorPoolSize, DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType,
+    DeviceCreateInfo, DeviceMemory, Fence, Format, Image, Image2dCreateInfo, ImageBarrier,
+    ImageLayout, ImageUsage, ImageView, Instance, InstanceCreateInfo, KHRONOS_VALIDATION_LAYER,
     MemoryPropertyFlags, PipelineLayout, PipelineStatisticsFlags, PushConstantRange, QueryPool,
     QueueCreateInfo, QueueFlags, ShaderModule, ShaderStageFlags, SpecializationConstants,
 };
@@ -1207,4 +1208,289 @@ fn test_instance_validation_constructor_when_available() {
         Ok(_inst) => {}
         Err(e) => eprintln!("validation() constructor returned err: {e}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Image tests: 2D storage image creation, layout transitions, and a full
+// buffer -> image -> compute -> image -> buffer round trip.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_image_usage_bitor_and_format_constants() {
+    let usage = ImageUsage::STORAGE | ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC;
+    assert!(usage.contains(ImageUsage::STORAGE));
+    assert!(usage.contains(ImageUsage::TRANSFER_DST));
+    assert!(usage.contains(ImageUsage::TRANSFER_SRC));
+    assert!(!usage.contains(ImageUsage::SAMPLED));
+
+    // Format constants are just sanity checks that the wrapper exists.
+    assert_ne!(Format::R8_UNORM, Format::R32_UINT);
+    assert_ne!(ImageLayout::UNDEFINED, ImageLayout::GENERAL);
+}
+
+#[test]
+fn test_buffer_image_copy_full_2d_helper() {
+    let r = BufferImageCopy::full_2d(64, 32);
+    assert_eq!(r.image_extent, [64, 32, 1]);
+    assert_eq!(r.image_offset, [0, 0, 0]);
+    assert_eq!(r.buffer_offset, 0);
+    assert_eq!(r.buffer_row_length, 0);
+    assert_eq!(r.buffer_image_height, 0);
+}
+
+#[test]
+fn test_image_2d_creation_and_memory_binding() {
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+
+    let image = Image::new_2d(
+        &device,
+        Image2dCreateInfo {
+            format: Format::R32_UINT,
+            width: 64,
+            height: 64,
+            usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC,
+        },
+    )
+    .unwrap();
+    assert_eq!(image.format(), Format::R32_UINT);
+    assert_eq!(image.width(), 64);
+    assert_eq!(image.height(), 64);
+    assert!(image.raw() != 0);
+
+    let req = image.memory_requirements();
+    assert!(req.size >= 64 * 64 * 4);
+    assert!(req.alignment.is_power_of_two());
+
+    // Try to find a device-local memory type. If unavailable, fall back to
+    // host-visible (Lavapipe sometimes lacks DEVICE_LOCAL).
+    let mt = physical
+        .find_memory_type(req.memory_type_bits, MemoryPropertyFlags::DEVICE_LOCAL)
+        .or_else(|| {
+            physical.find_memory_type(req.memory_type_bits, MemoryPropertyFlags::HOST_VISIBLE)
+        })
+        .expect("some memory type should back the image");
+    let memory = DeviceMemory::allocate(&device, req.size, mt).unwrap();
+    image.bind_memory(&memory, 0).unwrap();
+
+    // ImageView creation should also succeed.
+    let view = ImageView::new_2d_color(&image).unwrap();
+    assert!(view.raw() != 0);
+}
+
+#[test]
+fn test_image_buffer_round_trip_via_layout_transitions() {
+    // Validates: layout transitions, buffer -> image copy, image -> buffer
+    // copy. We don't run a shader here — just verify that the bytes survive
+    // a round trip through an image's storage on the GPU.
+    let Some((_inst, physical, device, queue, queue_family)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+
+    const W: u32 = 16;
+    const H: u32 = 16;
+    const PIXEL_BYTES: u64 = 4; // R32_UINT
+    const BUF_SIZE: u64 = (W as u64) * (H as u64) * PIXEL_BYTES;
+
+    // Source staging buffer pre-filled from the host.
+    let src = Buffer::new(
+        &device,
+        BufferCreateInfo {
+            size: BUF_SIZE,
+            usage: BufferUsage::TRANSFER_SRC,
+        },
+    )
+    .unwrap();
+    let src_req = src.memory_requirements();
+    let src_mt = physical
+        .find_memory_type(
+            src_req.memory_type_bits,
+            MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
+        )
+        .unwrap();
+    let mut src_mem = DeviceMemory::allocate(&device, src_req.size, src_mt).unwrap();
+    src.bind_memory(&src_mem, 0).unwrap();
+    {
+        let mut m = src_mem.map().unwrap();
+        let bytes = m.as_slice_mut();
+        for i in 0..(W * H) as usize {
+            let v = (i as u32).wrapping_mul(0x9E3779B1u32);
+            bytes[i * 4..(i + 1) * 4].copy_from_slice(&v.to_le_bytes());
+        }
+    }
+
+    // The image: STORAGE so it could be used for compute, TRANSFER_DST and
+    // TRANSFER_SRC for the round trip.
+    let image = Image::new_2d(
+        &device,
+        Image2dCreateInfo {
+            format: Format::R32_UINT,
+            width: W,
+            height: H,
+            usage: ImageUsage::STORAGE | ImageUsage::TRANSFER_DST | ImageUsage::TRANSFER_SRC,
+        },
+    )
+    .unwrap();
+    let img_req = image.memory_requirements();
+    // Use the most-permissive memory type the driver allows.
+    let img_mt = physical
+        .find_memory_type(img_req.memory_type_bits, MemoryPropertyFlags::DEVICE_LOCAL)
+        .or_else(|| {
+            physical.find_memory_type(img_req.memory_type_bits, MemoryPropertyFlags::HOST_VISIBLE)
+        })
+        .expect("some memory type should back the image");
+    let img_mem = DeviceMemory::allocate(&device, img_req.size, img_mt).unwrap();
+    image.bind_memory(&img_mem, 0).unwrap();
+
+    // Destination readback buffer.
+    let dst = Buffer::new(
+        &device,
+        BufferCreateInfo {
+            size: BUF_SIZE,
+            usage: BufferUsage::TRANSFER_DST,
+        },
+    )
+    .unwrap();
+    let dst_req = dst.memory_requirements();
+    let dst_mt = physical
+        .find_memory_type(
+            dst_req.memory_type_bits,
+            MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
+        )
+        .unwrap();
+    let mut dst_mem = DeviceMemory::allocate(&device, dst_req.size, dst_mt).unwrap();
+    dst.bind_memory(&dst_mem, 0).unwrap();
+    {
+        // Zero so we can detect overwrite.
+        let mut m = dst_mem.map().unwrap();
+        m.as_slice_mut().fill(0);
+    }
+
+    // Pipeline-stage and access constants we need.
+    const TOP_OF_PIPE: u32 = 0x1;
+    const TRANSFER: u32 = 0x1000;
+    const HOST: u32 = 0x4000;
+    const ACCESS_TRANSFER_READ: u32 = 0x800;
+    const ACCESS_TRANSFER_WRITE: u32 = 0x1000;
+    const ACCESS_HOST_READ: u32 = 0x2000;
+
+    let pool = CommandPool::new(&device, queue_family).unwrap();
+    let mut cmd = pool.allocate_primary().unwrap();
+    {
+        let mut rec = cmd.begin().unwrap();
+        // 1) UNDEFINED -> TRANSFER_DST_OPTIMAL
+        rec.image_barrier(
+            TOP_OF_PIPE,
+            TRANSFER,
+            ImageBarrier {
+                image: &image,
+                old_layout: ImageLayout::UNDEFINED,
+                new_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
+                src_access: 0,
+                dst_access: ACCESS_TRANSFER_WRITE,
+            },
+        );
+        // 2) Copy buffer -> image
+        rec.copy_buffer_to_image(
+            &src,
+            &image,
+            ImageLayout::TRANSFER_DST_OPTIMAL,
+            &[BufferImageCopy::full_2d(W, H)],
+        );
+        // 3) TRANSFER_DST -> TRANSFER_SRC_OPTIMAL
+        rec.image_barrier(
+            TRANSFER,
+            TRANSFER,
+            ImageBarrier {
+                image: &image,
+                old_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
+                new_layout: ImageLayout::TRANSFER_SRC_OPTIMAL,
+                src_access: ACCESS_TRANSFER_WRITE,
+                dst_access: ACCESS_TRANSFER_READ,
+            },
+        );
+        // 4) Copy image -> buffer
+        rec.copy_image_to_buffer(
+            &image,
+            ImageLayout::TRANSFER_SRC_OPTIMAL,
+            &dst,
+            &[BufferImageCopy::full_2d(W, H)],
+        );
+        // 5) Transfer -> Host barrier so the host read sees the bytes.
+        rec.memory_barrier(TRANSFER, HOST, ACCESS_TRANSFER_WRITE, ACCESS_HOST_READ);
+        rec.end().unwrap();
+    }
+
+    let fence = Fence::new(&device).unwrap();
+    queue.submit(&[&cmd], Some(&fence)).unwrap();
+    fence.wait(u64::MAX).unwrap();
+
+    // Verify every pixel survived the round trip.
+    {
+        let m = dst_mem.map().unwrap();
+        let b = m.as_slice();
+        for i in 0..(W * H) as usize {
+            let read = u32::from_le_bytes([b[i * 4], b[i * 4 + 1], b[i * 4 + 2], b[i * 4 + 3]]);
+            let expected = (i as u32).wrapping_mul(0x9E3779B1u32);
+            assert_eq!(read, expected, "pixel {i} did not survive image round trip");
+        }
+    }
+}
+
+#[test]
+fn test_storage_image_descriptor_wiring() {
+    // Validates that allocating a STORAGE_IMAGE descriptor and pointing it
+    // at an ImageView round-trips through the safe wrapper without errors.
+    // We don't dispatch a shader here — that would need a shipped .spv file.
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+
+    let image = Image::new_2d(
+        &device,
+        Image2dCreateInfo {
+            format: Format::R32_UINT,
+            width: 8,
+            height: 8,
+            usage: ImageUsage::STORAGE,
+        },
+    )
+    .unwrap();
+    let req = image.memory_requirements();
+    let mt = physical
+        .find_memory_type(req.memory_type_bits, MemoryPropertyFlags::DEVICE_LOCAL)
+        .or_else(|| {
+            physical.find_memory_type(req.memory_type_bits, MemoryPropertyFlags::HOST_VISIBLE)
+        })
+        .unwrap();
+    let memory = DeviceMemory::allocate(&device, req.size, mt).unwrap();
+    image.bind_memory(&memory, 0).unwrap();
+    let view = ImageView::new_2d_color(&image).unwrap();
+
+    let set_layout = DescriptorSetLayout::new(
+        &device,
+        &[DescriptorSetLayoutBinding {
+            binding: 0,
+            descriptor_type: DescriptorType::STORAGE_IMAGE,
+            descriptor_count: 1,
+            stage_flags: ShaderStageFlags::COMPUTE,
+        }],
+    )
+    .unwrap();
+    let pool = DescriptorPool::new(
+        &device,
+        1,
+        &[DescriptorPoolSize {
+            descriptor_type: DescriptorType::STORAGE_IMAGE,
+            descriptor_count: 1,
+        }],
+    )
+    .unwrap();
+    let dset = pool.allocate(&set_layout).unwrap();
+    dset.write_storage_image(0, &view, ImageLayout::GENERAL);
+    assert!(dset.raw() != 0);
 }

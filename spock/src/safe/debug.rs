@@ -168,8 +168,7 @@ pub(crate) unsafe extern "system" fn trampoline(
     // is alive and the box has not been freed. We deref one level of the
     // outer box to obtain the inner `&DebugCallback` directly so we don't
     // have to materialise a `&Box<dyn ...>` (which clippy dislikes).
-    let cb: &DebugCallback =
-        unsafe { (*(p_user_data as *const Box<DebugCallback>)).as_ref() };
+    let cb: &DebugCallback = unsafe { (*(p_user_data as *const Box<DebugCallback>)).as_ref() };
 
     // Safety: Vulkan promises this pointer is valid for the duration of
     // the callback.

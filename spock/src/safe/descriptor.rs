@@ -12,21 +12,23 @@
 //! which is in turn part of the [`ComputePipeline`](super::ComputePipeline).
 
 use super::device::DeviceInner;
+use super::image::{ImageLayout, ImageView};
 use super::{Buffer, Device, Error, Result, check};
 use crate::raw::bindings::*;
 use std::sync::Arc;
 
 /// What kind of resource a descriptor binding represents.
 ///
-/// Currently only `STORAGE_BUFFER` and `UNIFORM_BUFFER` are exposed since
-/// they're sufficient for compute work. Sampler/image variants will be added
-/// when the safe wrapper grows graphics support.
+/// `STORAGE_BUFFER`, `UNIFORM_BUFFER`, and `STORAGE_IMAGE` are sufficient for
+/// the entire compute path. Sampler / sampled-image variants land with the
+/// graphics work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DescriptorType(pub VkDescriptorType);
 
 impl DescriptorType {
     pub const STORAGE_BUFFER: Self = Self(VkDescriptorType::DESCRIPTOR_TYPE_STORAGE_BUFFER);
     pub const UNIFORM_BUFFER: Self = Self(VkDescriptorType::DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    pub const STORAGE_IMAGE: Self = Self(VkDescriptorType::DESCRIPTOR_TYPE_STORAGE_IMAGE);
 }
 
 /// Which pipeline stages may access a descriptor.
@@ -269,6 +271,39 @@ impl DescriptorSet {
             descriptorCount: 1,
             descriptorType: descriptor_type.0,
             pBufferInfo: &info,
+            ..Default::default()
+        };
+
+        // Safety: handle is valid, write/info live for the duration of the call.
+        unsafe { update(self.device.handle, 1, &write, 0, std::ptr::null()) };
+    }
+
+    /// Update one binding in this set to point at an image view (currently
+    /// only `STORAGE_IMAGE` is supported by the safe wrapper).
+    ///
+    /// `image_layout` is the layout the shader will see when it accesses
+    /// the image — for `STORAGE_IMAGE` this should be
+    /// [`ImageLayout::GENERAL`](super::ImageLayout::GENERAL).
+    pub fn write_storage_image(&self, binding: u32, view: &ImageView, image_layout: ImageLayout) {
+        let update = self
+            .device
+            .dispatch
+            .vkUpdateDescriptorSets
+            .expect("vkUpdateDescriptorSets is required by Vulkan 1.0");
+
+        let info = VkDescriptorImageInfo {
+            sampler: 0,
+            imageView: view.handle,
+            imageLayout: image_layout.0,
+        };
+
+        let write = VkWriteDescriptorSet {
+            sType: VkStructureType::STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            dstSet: self.handle,
+            dstBinding: binding,
+            descriptorCount: 1,
+            descriptorType: VkDescriptorType::DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            pImageInfo: &info,
             ..Default::default()
         };
 

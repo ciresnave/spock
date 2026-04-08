@@ -19,20 +19,29 @@
 //!
 //! The safe wrapper covers the **complete compute path**:
 //!
-//! - [`Instance`] / [`InstanceCreateInfo`]
+//! - [`Instance`] / [`InstanceCreateInfo`] (with optional validation
+//!   layer + debug-utils messenger)
 //! - [`PhysicalDevice`]
 //! - [`Device`] / [`DeviceCreateInfo`] / [`Queue`]
 //! - [`DeviceMemory`] (with mapping)
 //! - [`Buffer`] / [`BufferCreateInfo`]
+//! - [`Image`] / [`ImageView`] (2D storage images for compute, with
+//!   layout transitions and buffer↔image copies)
 //! - [`ShaderModule`] (takes any `&[u32]` of SPIR-V)
 //! - [`DescriptorSetLayout`] / [`DescriptorPool`] / [`DescriptorSet`]
-//! - [`PipelineLayout`] / [`ComputePipeline`]
-//! - [`CommandPool`] / [`CommandBuffer`] (record `dispatch`, `bind_pipeline`,
-//!   `bind_descriptor_sets`, `fill_buffer`, `memory_barrier`)
+//!   (storage buffer, uniform buffer, storage image)
+//! - [`PipelineLayout`] (with push constants) / [`ComputePipeline`]
+//!   (with specialization constants)
+//! - [`CommandPool`] / [`CommandBuffer`] — `dispatch`,
+//!   `dispatch_indirect`, `bind_pipeline`, `bind_descriptor_sets`,
+//!   `push_constants`, `fill_buffer`, `copy_buffer`,
+//!   `copy_buffer_to_image`, `copy_image_to_buffer`, `image_barrier`,
+//!   `memory_barrier`, `reset_query_pool`, `write_timestamp`
+//! - [`QueryPool`] (timestamps and pipeline statistics)
 //! - [`Fence`]
 //!
 //! Graphics-specific functionality (swapchains, render passes, graphics
-//! pipelines, images, samplers) is not yet covered. Use
+//! pipelines, color/depth images, samplers) is not yet covered. Use
 //! [`spock::raw`](crate::raw) for those use cases.
 //!
 //! Compiling shaders is left to the user; spock takes SPIR-V as `&[u32]`.
@@ -69,6 +78,7 @@ mod command;
 mod debug;
 mod descriptor;
 mod device;
+mod image;
 mod instance;
 mod memory;
 #[cfg(feature = "naga")]
@@ -89,6 +99,10 @@ pub use descriptor::{
     DescriptorSetLayoutBinding, DescriptorType, ShaderStageFlags,
 };
 pub use device::{Device, DeviceCreateInfo, Queue, QueueCreateInfo};
+pub use image::{
+    BufferImageCopy, Format, Image, Image2dCreateInfo, ImageBarrier, ImageLayout, ImageUsage,
+    ImageView,
+};
 pub use instance::{
     ApiVersion, DEBUG_UTILS_EXTENSION, ExtensionProperties, Instance, InstanceCreateInfo,
     KHRONOS_VALIDATION_LAYER, LayerProperties,
