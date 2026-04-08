@@ -4,15 +4,15 @@
 //! Skips gracefully on systems without Vulkan installed.
 
 use spock::safe::{
-    AllocationCreateInfo, AllocationUsage, Allocator, ApiVersion, Buffer, BufferCopy,
-    BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool, ComputePipeline,
+    AllocationCreateInfo, AllocationStrategy, AllocationUsage, Allocator, ApiVersion, Buffer,
+    BufferCopy, BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool, ComputePipeline,
     DEBUG_UTILS_EXTENSION, DebugMessage, DebugMessageSeverity, DescriptorPool, DescriptorPoolSize,
     DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType, DeviceCreateInfo,
     DeviceFeatures, DeviceMemory, Fence, Format, Image, Image2dCreateInfo, ImageBarrier,
     ImageLayout, ImageUsage, ImageView, Instance, InstanceCreateInfo, KHRONOS_VALIDATION_LAYER,
-    MemoryPropertyFlags, PipelineCache, PipelineLayout, PipelineStatisticsFlags, PushConstantRange,
-    QueryPool, QueueCreateInfo, QueueFlags, Semaphore, SemaphoreKind, ShaderModule,
-    ShaderStageFlags, SignalSemaphore, SpecializationConstants, WaitSemaphore,
+    MemoryPropertyFlags, PipelineCache, PipelineLayout, PipelineStatisticsFlags, PoolCreateInfo,
+    PushConstantRange, QueryPool, QueueCreateInfo, QueueFlags, Semaphore, SemaphoreKind,
+    ShaderModule, ShaderStageFlags, SignalSemaphore, SpecializationConstants, WaitSemaphore,
 };
 
 #[test]
@@ -2243,4 +2243,254 @@ fn test_supported_features_query_succeeds() {
     // Just verify the call doesn't crash; the bit-set returned varies
     // by hardware. We don't assert any specific bit is set because
     // even Lavapipe exposes very few core 1.0 features by default.
+}
+
+// ---------------------------------------------------------------------------
+// Custom pool + linear pool tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_allocator_custom_freelist_pool_round_trip() {
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+    let allocator = Allocator::new(&device, &physical).unwrap();
+
+    // Pick a host-visible memory type for the pool.
+    let dummy_buf = Buffer::new(
+        &device,
+        BufferCreateInfo {
+            size: 256,
+            usage: BufferUsage::STORAGE_BUFFER,
+        },
+    )
+    .unwrap();
+    let req = dummy_buf.memory_requirements();
+    drop(dummy_buf);
+    let mt = physical
+        .find_memory_type(
+            req.memory_type_bits,
+            MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
+        )
+        .unwrap();
+
+    let pool = allocator
+        .create_pool(PoolCreateInfo {
+            memory_type_index: mt,
+            strategy: AllocationStrategy::FreeList,
+            block_size: 1024 * 1024, // 1 MiB pool block
+            max_block_count: 0,
+        })
+        .unwrap();
+
+    // Allocate several buffers from the custom pool.
+    let mut allocations = Vec::new();
+    let mut buffers = Vec::new();
+    for _ in 0..8 {
+        let (b, a) = allocator
+            .create_buffer(
+                BufferCreateInfo {
+                    size: 4096,
+                    usage: BufferUsage::STORAGE_BUFFER,
+                },
+                AllocationCreateInfo {
+                    pool: Some(pool),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        buffers.push(b);
+        allocations.push(a);
+    }
+
+    let pool_stats = allocator.pool_statistics(pool).unwrap();
+    assert_eq!(pool_stats.allocation_count, 8);
+    assert!(pool_stats.allocation_bytes >= 8 * 4096);
+    // All 8 allocations should fit in the 1 MiB block.
+    assert_eq!(pool_stats.block_count, 1);
+
+    for a in allocations.drain(..) {
+        allocator.free(a);
+    }
+    drop(buffers);
+
+    let pool_stats = allocator.pool_statistics(pool).unwrap();
+    assert_eq!(pool_stats.allocation_count, 0);
+
+    allocator.destroy_pool(pool);
+    // After destruction the pool handle is unknown.
+    assert!(allocator.pool_statistics(pool).is_none());
+}
+
+#[test]
+fn test_allocator_linear_pool_supports_reset() {
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+    let allocator = Allocator::new(&device, &physical).unwrap();
+
+    // Pick a host-visible memory type.
+    let dummy_buf = Buffer::new(
+        &device,
+        BufferCreateInfo {
+            size: 256,
+            usage: BufferUsage::STORAGE_BUFFER,
+        },
+    )
+    .unwrap();
+    let req = dummy_buf.memory_requirements();
+    drop(dummy_buf);
+    let mt = physical
+        .find_memory_type(
+            req.memory_type_bits,
+            MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
+        )
+        .unwrap();
+
+    let pool = allocator
+        .create_pool(PoolCreateInfo {
+            memory_type_index: mt,
+            strategy: AllocationStrategy::Linear,
+            block_size: 64 * 1024, // 64 KiB linear block
+            max_block_count: 0,
+        })
+        .unwrap();
+
+    // Bump-allocate a bunch of small chunks. They should not be returned
+    // individually — only via reset_pool.
+    let mut buffers = Vec::new();
+    let mut allocations = Vec::new();
+    for _ in 0..10 {
+        let (b, a) = allocator
+            .create_buffer(
+                BufferCreateInfo {
+                    size: 1024,
+                    usage: BufferUsage::STORAGE_BUFFER,
+                },
+                AllocationCreateInfo {
+                    pool: Some(pool),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        buffers.push(b);
+        allocations.push(a);
+    }
+
+    let stats_before = allocator.pool_statistics(pool).unwrap();
+    assert_eq!(stats_before.allocation_count, 10);
+
+    // Drop the buffers (which calls vkDestroyBuffer) before reset.
+    drop(buffers);
+
+    // Reset the pool — all 10 allocations are reclaimed in one shot.
+    allocator.reset_pool(pool);
+    let stats_after = allocator.pool_statistics(pool).unwrap();
+    assert_eq!(stats_after.allocation_count, 0);
+    assert_eq!(stats_after.allocation_bytes, 0);
+
+    // We can keep allocating into the same pool after reset.
+    let (b2, a2) = allocator
+        .create_buffer(
+            BufferCreateInfo {
+                size: 2048,
+                usage: BufferUsage::STORAGE_BUFFER,
+            },
+            AllocationCreateInfo {
+                pool: Some(pool),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    let stats_post = allocator.pool_statistics(pool).unwrap();
+    assert_eq!(stats_post.allocation_count, 1);
+
+    drop(b2);
+    drop(a2);
+    // Don't bother freeing — the destroy_pool below will reclaim everything.
+    allocator.destroy_pool(pool);
+}
+
+#[test]
+fn test_allocator_linear_pool_full_returns_error() {
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+    let allocator = Allocator::new(&device, &physical).unwrap();
+
+    let dummy_buf = Buffer::new(
+        &device,
+        BufferCreateInfo {
+            size: 256,
+            usage: BufferUsage::STORAGE_BUFFER,
+        },
+    )
+    .unwrap();
+    let req = dummy_buf.memory_requirements();
+    drop(dummy_buf);
+    let mt = physical
+        .find_memory_type(
+            req.memory_type_bits,
+            MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
+        )
+        .unwrap();
+
+    // Tiny linear pool — only one tiny block.
+    let pool = allocator
+        .create_pool(PoolCreateInfo {
+            memory_type_index: mt,
+            strategy: AllocationStrategy::Linear,
+            block_size: 4096,
+            max_block_count: 1,
+        })
+        .unwrap();
+
+    // First allocation succeeds.
+    let r1 = allocator.create_buffer(
+        BufferCreateInfo {
+            size: 2048,
+            usage: BufferUsage::STORAGE_BUFFER,
+        },
+        AllocationCreateInfo {
+            pool: Some(pool),
+            ..Default::default()
+        },
+    );
+    assert!(r1.is_ok());
+
+    // Second allocation might fit (2048 + 2048 = 4096) — depends on
+    // alignment. If it does fit, the third should fail.
+    let _r2 = allocator.create_buffer(
+        BufferCreateInfo {
+            size: 2048,
+            usage: BufferUsage::STORAGE_BUFFER,
+        },
+        AllocationCreateInfo {
+            pool: Some(pool),
+            ..Default::default()
+        },
+    );
+
+    // Third allocation: even if r2 succeeded, we're definitely over the
+    // 4 KiB block limit now, and max_block_count = 1 prevents growth.
+    let r3 = allocator.create_buffer(
+        BufferCreateInfo {
+            size: 4096,
+            usage: BufferUsage::STORAGE_BUFFER,
+        },
+        AllocationCreateInfo {
+            pool: Some(pool),
+            ..Default::default()
+        },
+    );
+    assert!(
+        r3.is_err(),
+        "expected linear pool to refuse over-budget allocation"
+    );
+
+    allocator.destroy_pool(pool);
 }

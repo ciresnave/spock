@@ -92,7 +92,8 @@ mod shader;
 mod sync;
 
 pub use allocator::{
-    Allocation, AllocationCreateInfo, AllocationStatistics, AllocationUsage, Allocator,
+    Allocation, AllocationCreateInfo, AllocationStatistics, AllocationStrategy, AllocationUsage,
+    Allocator, PoolCreateInfo, PoolHandle,
 };
 pub use buffer::{Buffer, BufferCreateInfo, BufferUsage};
 pub use command::{BufferCopy, CommandBuffer, CommandBufferRecording, CommandPool};
