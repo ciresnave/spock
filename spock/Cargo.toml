@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 description = "Vulkan API bindings generated entirely from vk.xml, with a complete safe RAII wrapper covering compute and graphics: instance/device/queue, buffer, image, sampler, render pass, framebuffer, graphics + compute pipelines, swapchain, a VMA-style sub-allocator with TLSF + linear pools and defragmentation, sync primitives (fences, binary + timeline semaphores, sync2 barriers), query pools, and an optional naga GLSL→SPIR-V feature. Supports Vulkan 1.2.175 onward — swap vk.xml and rebuild."
 keywords = ["vulkan", "graphics", "gpu", "rendering", "ffi"]
 categories = ["graphics", "api-bindings", "rendering", "external-ffi-bindings"]
-readme = "../README.md"
+readme = "README.md"
 repository = "https://github.com/ciresnave/spock"
 homepage = "https://github.com/ciresnave/spock"
 documentation = "https://docs.rs/spock"
@@ -32,7 +32,9 @@ libloading = { workspace = true }
 naga = { version = "29", optional = true, default-features = false, features = ["glsl-in", "spv-out"] }
 
 [build-dependencies]
-vulkan_gen = { path = "../vulkan_gen" }
+# Path is used for development; the version is what crates.io uses
+# when publishing — both are required by `cargo publish`.
+vulkan_gen = { path = "../vulkan_gen", version = "0.1" }
 ureq = "3"
 
 # Example-only dependencies. Not pulled into the spock crate's own

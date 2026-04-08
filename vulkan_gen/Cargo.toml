@@ -11,6 +11,7 @@ categories = ["development-tools", "parser-implementations", "graphics"]
 repository = "https://github.com/ciresnave/spock"
 homepage = "https://github.com/ciresnave/spock"
 documentation = "https://docs.rs/vulkan_gen"
+readme = "README.md"
 
 [dependencies]
 roxmltree = "0.21"
