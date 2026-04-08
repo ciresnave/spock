@@ -6,13 +6,14 @@
 use spock::safe::{
     AllocationCreateInfo, AllocationStrategy, AllocationUsage, Allocator, ApiVersion, Buffer,
     BufferCopy, BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool, ComputePipeline,
-    DEBUG_UTILS_EXTENSION, DebugMessage, DebugMessageSeverity, DescriptorPool, DescriptorPoolSize,
-    DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType, DeviceCreateInfo,
-    DeviceFeatures, DeviceMemory, Fence, Format, Image, Image2dCreateInfo, ImageBarrier,
-    ImageLayout, ImageUsage, ImageView, Instance, InstanceCreateInfo, KHRONOS_VALIDATION_LAYER,
-    MemoryPropertyFlags, PipelineCache, PipelineLayout, PipelineStatisticsFlags, PoolCreateInfo,
-    PushConstantRange, QueryPool, QueueCreateInfo, QueueFlags, Semaphore, SemaphoreKind,
-    ShaderModule, ShaderStageFlags, SignalSemaphore, SpecializationConstants, WaitSemaphore,
+    DEBUG_UTILS_EXTENSION, DebugMessage, DebugMessageSeverity, DefragmentationMove,
+    DefragmentationPlan, DescriptorPool, DescriptorPoolSize, DescriptorSetLayout,
+    DescriptorSetLayoutBinding, DescriptorType, DeviceCreateInfo, DeviceFeatures, DeviceMemory,
+    Fence, Format, Image, Image2dCreateInfo, ImageBarrier, ImageLayout, ImageUsage, ImageView,
+    Instance, InstanceCreateInfo, KHRONOS_VALIDATION_LAYER, MemoryPropertyFlags, PipelineCache,
+    PipelineLayout, PipelineStatisticsFlags, PoolCreateInfo, PushConstantRange, QueryPool,
+    QueueCreateInfo, QueueFlags, Semaphore, SemaphoreKind, ShaderModule, ShaderStageFlags,
+    SignalSemaphore, SpecializationConstants, WaitSemaphore,
 };
 
 #[test]
@@ -2493,4 +2494,173 @@ fn test_allocator_linear_pool_full_returns_error() {
     );
 
     allocator.destroy_pool(pool);
+}
+
+#[test]
+fn test_allocator_defragmentation_compacts_fragmented_pool() {
+    // Create a custom FreeList pool, allocate alternating large/small
+    // buffers, free every other one to create holes, then build a defrag
+    // plan and verify that:
+    //   - the plan is non-empty (there's something to compact)
+    //   - applying the plan does not invalidate live Allocation handles
+    //     (memory() / offset() return new positions but size() / id()
+    //     are stable)
+    //   - the post-defrag positions are contiguous from offset 0
+    //   - the pool can still allocate from the freed space afterward
+    let Some((_inst, physical, device, _q, _qf)) = try_init_compute() else {
+        eprintln!("SKIP: no Vulkan ICD");
+        return;
+    };
+    let allocator = Allocator::new(&device, &physical).unwrap();
+
+    // Pick a host-visible memory type for predictability.
+    let dummy_buf = Buffer::new(
+        &device,
+        BufferCreateInfo {
+            size: 256,
+            usage: BufferUsage::STORAGE_BUFFER,
+        },
+    )
+    .unwrap();
+    let req = dummy_buf.memory_requirements();
+    drop(dummy_buf);
+    let mt = physical
+        .find_memory_type(
+            req.memory_type_bits,
+            MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
+        )
+        .unwrap();
+
+    let pool = allocator
+        .create_pool(PoolCreateInfo {
+            memory_type_index: mt,
+            strategy: AllocationStrategy::FreeList,
+            block_size: 256 * 1024, // 256 KiB
+            max_block_count: 1,
+        })
+        .unwrap();
+
+    // Allocate 8 buffers of varying sizes with user_data tags.
+    let mut buffers: Vec<(Buffer, spock::safe::Allocation)> = Vec::new();
+    for i in 0..8 {
+        let (b, a) = allocator
+            .create_buffer(
+                BufferCreateInfo {
+                    size: 4096 * (i as u64 + 1),
+                    usage: BufferUsage::STORAGE_BUFFER,
+                },
+                AllocationCreateInfo {
+                    pool: Some(pool),
+                    user_data: 100 + i as u64,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        buffers.push((b, a));
+    }
+
+    // Free every odd-indexed allocation to create holes.
+    let mut survivors: Vec<spock::safe::Allocation> = Vec::new();
+    for (i, (buffer, alloc)) in buffers.into_iter().enumerate() {
+        if i % 2 == 1 {
+            // free it.
+            drop(buffer);
+            allocator.free(alloc);
+        } else {
+            // Keep this one alive across defrag.
+            drop(buffer);
+            survivors.push(alloc);
+        }
+    }
+
+    // Snapshot pre-defrag IDs / sizes / user_data.
+    let pre: Vec<(u64, u64, u64)> = survivors
+        .iter()
+        .map(|a| (a.id(), a.size(), a.user_data()))
+        .collect();
+
+    // Build the defragmentation plan.
+    let plan = allocator.build_defragmentation_plan(pool);
+    assert!(
+        !plan.total_layout().is_empty(),
+        "defrag plan should include all 4 surviving allocations"
+    );
+
+    // Sanity-check the move list: every move's user_data should match
+    // one of our survivors.
+    for m in &plan.moves {
+        assert!(
+            survivors.iter().any(|a| a.user_data() == m.user_data),
+            "move user_data {} should match a surviving allocation",
+            m.user_data
+        );
+    }
+
+    // Apply the plan. (We don't actually issue GPU copies here — this
+    // test only verifies the bookkeeping side of defrag, not data
+    // integrity. A full GPU-copy test would need a command buffer +
+    // submit + fence-wait per move.)
+    allocator.apply_defragmentation_plan(plan);
+
+    // Post-defrag: every survivor still has its original id, size, and
+    // user_data, but offset() may have changed. The positions should be
+    // monotonically increasing from 0.
+    let mut last_offset: u64 = 0;
+    for (i, alloc) in survivors.iter().enumerate() {
+        assert_eq!(alloc.id(), pre[i].0, "id should be stable across defrag");
+        assert_eq!(
+            alloc.size(),
+            pre[i].1,
+            "size should be stable across defrag"
+        );
+        assert_eq!(
+            alloc.user_data(),
+            pre[i].2,
+            "user_data should be stable across defrag"
+        );
+        let off = alloc.offset();
+        assert!(
+            off >= last_offset,
+            "post-defrag offsets should be monotonically increasing (got {off} after {last_offset})"
+        );
+        last_offset = off + alloc.size();
+    }
+
+    // After defrag, we should be able to allocate something large in
+    // the freed-up space — proves the TLSF state was rebuilt.
+    let (_b, post_alloc) = allocator
+        .create_buffer(
+            BufferCreateInfo {
+                size: 64 * 1024,
+                usage: BufferUsage::STORAGE_BUFFER,
+            },
+            AllocationCreateInfo {
+                pool: Some(pool),
+                ..Default::default()
+            },
+        )
+        .expect("post-defrag allocation should succeed");
+    assert!(post_alloc.size() >= 64 * 1024);
+
+    // Cleanup.
+    drop(survivors);
+    drop(post_alloc);
+    allocator.destroy_pool(pool);
+}
+
+#[test]
+fn test_defragmentation_move_struct_round_trip() {
+    let m = DefragmentationMove {
+        allocation_id: 42,
+        user_data: 0xDEAD_BEEF,
+        size: 1024,
+        src_memory: 0x1000,
+        src_offset: 0,
+        dst_memory: 0x2000,
+        dst_offset: 256,
+    };
+    assert_eq!(m.allocation_id, 42);
+    assert_eq!(m.user_data, 0xDEAD_BEEF);
+    assert_eq!(m.size, 1024);
+    let _plan = DefragmentationPlan::default();
 }

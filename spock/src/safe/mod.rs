@@ -93,7 +93,7 @@ mod sync;
 
 pub use allocator::{
     Allocation, AllocationCreateInfo, AllocationStatistics, AllocationStrategy, AllocationUsage,
-    Allocator, PoolCreateInfo, PoolHandle,
+    Allocator, DefragmentationMove, DefragmentationPlan, PoolCreateInfo, PoolHandle,
 };
 pub use buffer::{Buffer, BufferCreateInfo, BufferUsage};
 pub use command::{BufferCopy, CommandBuffer, CommandBufferRecording, CommandPool};

@@ -163,6 +163,13 @@ pub struct AllocationCreateInfo {
     /// [`Allocator::create_pool`]). When `None`, the default per-memory-type
     /// pool is used.
     pub pool: Option<PoolHandle>,
+    /// Opaque caller data attached to the allocation. Surfaced via
+    /// [`Allocation::user_data`] and on each
+    /// [`DefragmentationMove::user_data`] entry, so apps can map an
+    /// allocation back to whatever buffer/image they bound it to. Common
+    /// patterns: a `u64` cast of an `Arc<MyResource>` raw pointer, or
+    /// a slot index into the app's own resource table.
+    pub user_data: u64,
 }
 
 /// Aggregate statistics for the [`Allocator`].
@@ -245,6 +252,10 @@ struct Pool {
     max_block_count: u32,
     strategy: AllocationStrategy,
     mapped: bool,
+    /// Weak references to every allocation handed out from this pool.
+    /// Used by defragmentation to walk live allocations. Periodically
+    /// pruned of dead entries.
+    live_allocations: Vec<std::sync::Weak<AllocationInner>>,
 }
 
 impl Pool {
@@ -256,6 +267,7 @@ impl Pool {
             max_block_count: 0,
             strategy: AllocationStrategy::FreeList,
             mapped: false,
+            live_allocations: Vec::new(),
         }
     }
 
@@ -278,6 +290,7 @@ impl Pool {
             max_block_count: max,
             strategy: info.strategy,
             mapped,
+            live_allocations: Vec::new(),
         }
     }
 }
@@ -309,8 +322,64 @@ struct PoolState {
     /// User-created custom pools, keyed by `PoolHandle`.
     custom_pools: HashMap<u64, Pool>,
     next_pool_id: u64,
+    /// Stable ids for allocations, used by defragmentation to identify
+    /// individual allocations across moves.
+    next_alloc_id: u64,
     statistics: AllocationStatistics,
     dedicated_blocks: Vec<DedicatedBlock>,
+}
+
+/// Build an `Allocation` from its parts and register it in the
+/// appropriate pool's live-allocation list (so defragmentation can walk
+/// it later). Centralised so all allocation construction goes through
+/// one path.
+#[allow(clippy::too_many_arguments)] // every parameter is structural metadata
+fn make_allocation(
+    state: &mut PoolState,
+    memory: VkDeviceMemory,
+    offset: u64,
+    size: u64,
+    memory_type_index: u32,
+    mapped_ptr: *mut std::ffi::c_void,
+    kind: AllocationKind,
+    user_data: u64,
+) -> Allocation {
+    let id = state.next_alloc_id;
+    state.next_alloc_id += 1;
+    let alloc = Allocation {
+        inner: Arc::new(AllocationInner {
+            location: Mutex::new(AllocationLocation {
+                memory,
+                offset,
+                mapped_ptr,
+                kind: kind.clone(),
+            }),
+            size,
+            memory_type_index,
+            user_data,
+            id,
+        }),
+    };
+    // Register the weak ref in the owning pool so defragmentation can
+    // find it. Dedicated allocations are not registered (defrag only
+    // operates on pool allocations).
+    let weak = Arc::downgrade(&alloc.inner);
+    match &kind {
+        AllocationKind::DefaultPool {
+            memory_type_index, ..
+        } => {
+            if let Some(Some(pool)) = state.pools.get_mut(*memory_type_index as usize) {
+                pool.live_allocations.push(weak);
+            }
+        }
+        AllocationKind::CustomPool { pool_id, .. } => {
+            if let Some(pool) = state.custom_pools.get_mut(pool_id) {
+                pool.live_allocations.push(weak);
+            }
+        }
+        AllocationKind::Dedicated { .. } => {}
+    }
+    alloc
 }
 
 /// A `vkAllocateMemory`'d block that holds exactly one user allocation.
@@ -334,25 +403,43 @@ unsafe impl Sync for DedicatedBlock {}
 /// A live allocation handed out by the [`Allocator`]. Free it explicitly
 /// by passing it to [`Allocator::free`], or by dropping the
 /// [`Buffer`]/[`Image`] returned by `create_buffer` / `create_image_2d`.
+///
+/// `Allocation` is `Clone` (cheap — internally a single `Arc`) so apps
+/// can share references freely. After a defragmentation pass, every
+/// clone of an allocation automatically reflects the new memory location:
+/// the next call to [`memory`](Self::memory) and [`offset`](Self::offset)
+/// returns the post-defrag values.
 #[derive(Debug, Clone)]
 pub struct Allocation {
-    pub(crate) memory: VkDeviceMemory,
-    pub(crate) offset: u64,
+    pub(crate) inner: Arc<AllocationInner>,
+}
+
+#[derive(Debug)]
+pub(crate) struct AllocationInner {
+    /// Mutable: changes if a defragmentation pass moves this allocation.
+    pub(crate) location: Mutex<AllocationLocation>,
     pub(crate) size: u64,
     pub(crate) memory_type_index: u32,
+    pub(crate) user_data: u64,
+    pub(crate) id: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AllocationLocation {
+    pub(crate) memory: VkDeviceMemory,
+    pub(crate) offset: u64,
     /// Persistent mapped pointer for the *containing block*, if any.
-    /// To get a pointer to this allocation specifically, add `offset`.
     pub(crate) mapped_ptr: *mut std::ffi::c_void,
     /// How to free this allocation: default pool, custom pool, or
     /// dedicated.
     pub(crate) kind: AllocationKind,
 }
 
-// Safety: the raw pointer inside Allocation is only safe to deref while
-// the parent Allocator is alive. Allocation values are owned by exactly
-// one Buffer/Image at a time, and the Allocator outlives both via Arc.
-unsafe impl Send for Allocation {}
-unsafe impl Sync for Allocation {}
+// Safety: the raw pointer inside AllocationLocation is only safe to deref
+// while the parent Allocator is alive. The Mutex makes any defrag update
+// happen-before subsequent reads.
+unsafe impl Send for AllocationInner {}
+unsafe impl Sync for AllocationInner {}
 
 #[derive(Debug, Clone)]
 pub(crate) enum AllocationKind {
@@ -378,36 +465,53 @@ pub(crate) enum AllocationKind {
 
 impl Allocation {
     /// Returns the raw `VkDeviceMemory` handle this allocation lives in.
+    /// May change between calls if a defragmentation pass has moved the
+    /// allocation; the safe wrapper synchronizes the read internally.
     pub fn memory(&self) -> VkDeviceMemory {
-        self.memory
+        self.inner.location.lock().unwrap().memory
     }
 
-    /// Byte offset of this allocation within its `VkDeviceMemory`.
+    /// Byte offset of this allocation within its current `VkDeviceMemory`.
     pub fn offset(&self) -> u64 {
-        self.offset
+        self.inner.location.lock().unwrap().offset
     }
 
-    /// Size of this allocation in bytes.
+    /// Size of this allocation in bytes. Stable for the lifetime of the
+    /// allocation — defragmentation never changes the size.
     pub fn size(&self) -> u64 {
-        self.size
+        self.inner.size
     }
 
-    /// Memory type index this allocation lives in.
+    /// Memory type index this allocation lives in. Stable for the
+    /// lifetime of the allocation.
     pub fn memory_type_index(&self) -> u32 {
-        self.memory_type_index
+        self.inner.memory_type_index
+    }
+
+    /// Opaque user data the caller attached to this allocation via
+    /// [`AllocationCreateInfo::user_data`].
+    pub fn user_data(&self) -> u64 {
+        self.inner.user_data
+    }
+
+    /// Allocator-internal stable identifier. Survives defragmentation
+    /// and is unique within an [`Allocator`].
+    pub fn id(&self) -> u64 {
+        self.inner.id
     }
 
     /// Returns the host-visible mapped pointer for this allocation, if
     /// the allocation was created `mapped: true` and the underlying
     /// memory type is host-visible. The pointer is into the parent
-    /// `VkDeviceMemory` at this allocation's `offset`.
+    /// `VkDeviceMemory` at this allocation's current `offset`.
     pub fn mapped_ptr(&self) -> Option<*mut std::ffi::c_void> {
-        if self.mapped_ptr.is_null() {
+        let loc = self.inner.location.lock().unwrap();
+        if loc.mapped_ptr.is_null() {
             None
         } else {
             // Safety: the parent block stays mapped for as long as this
             // allocation lives.
-            unsafe { Some(self.mapped_ptr.add(self.offset as usize)) }
+            unsafe { Some(loc.mapped_ptr.add(loc.offset as usize)) }
         }
     }
 }
@@ -437,6 +541,7 @@ impl Allocator {
                     pools,
                     custom_pools: HashMap::new(),
                     next_pool_id: 1,
+                    next_alloc_id: 1,
                     statistics: AllocationStatistics::default(),
                     dedicated_blocks: Vec::new(),
                 }),
@@ -573,8 +678,14 @@ impl Allocator {
     /// ensuring the resource bound to this allocation has been destroyed
     /// (or has not yet been bound).
     pub fn free(&self, allocation: Allocation) {
+        // Snapshot the current location while holding the per-allocation
+        // lock so we don't race with a defrag move.
+        let location = allocation.inner.location.lock().unwrap().clone();
+        let alloc_size = allocation.inner.size;
+        drop(allocation);
+
         let mut state = self.inner.pools.lock().unwrap();
-        match allocation.kind {
+        match location.kind {
             AllocationKind::DefaultPool {
                 memory_type_index,
                 block_index,
@@ -585,17 +696,15 @@ impl Allocator {
                     && let BlockStrategy::Tlsf(ref mut t) = block.strategy
                 {
                     t.free(TlsfAllocation {
-                        offset: allocation.offset,
-                        size: allocation.size,
+                        offset: location.offset,
+                        size: alloc_size,
                         block_id: tlsf_block_id,
                     });
                 }
                 state.statistics.allocation_count =
                     state.statistics.allocation_count.saturating_sub(1);
-                state.statistics.allocation_bytes = state
-                    .statistics
-                    .allocation_bytes
-                    .saturating_sub(allocation.size);
+                state.statistics.allocation_bytes =
+                    state.statistics.allocation_bytes.saturating_sub(alloc_size);
                 self.refresh_free_region_count(&mut state);
             }
             AllocationKind::CustomPool {
@@ -611,17 +720,15 @@ impl Allocator {
                     // individually — caller must use reset_pool. We
                     // silently no-op the per-alloc free in that case.
                     t.free(TlsfAllocation {
-                        offset: allocation.offset,
-                        size: allocation.size,
+                        offset: location.offset,
+                        size: alloc_size,
                         block_id: tlsf_block_id,
                     });
                 }
                 state.statistics.allocation_count =
                     state.statistics.allocation_count.saturating_sub(1);
-                state.statistics.allocation_bytes = state
-                    .statistics
-                    .allocation_bytes
-                    .saturating_sub(allocation.size);
+                state.statistics.allocation_bytes =
+                    state.statistics.allocation_bytes.saturating_sub(alloc_size);
                 self.refresh_free_region_count(&mut state);
             }
             AllocationKind::Dedicated { id } => {
@@ -649,10 +756,8 @@ impl Allocator {
                         .saturating_sub(1);
                     state.statistics.allocation_count =
                         state.statistics.allocation_count.saturating_sub(1);
-                    state.statistics.allocation_bytes = state
-                        .statistics
-                        .allocation_bytes
-                        .saturating_sub(allocation.size);
+                    state.statistics.allocation_bytes =
+                        state.statistics.allocation_bytes.saturating_sub(alloc_size);
                 }
             }
         }
@@ -704,17 +809,12 @@ impl Allocator {
                 continue;
             };
             if let Some(ta) = t.allocate(requirements.size, requirements.alignment) {
-                let alloc = Allocation {
-                    memory: block.memory,
-                    offset: ta.offset,
-                    size: ta.size,
+                let memory = block.memory;
+                let mapped_ptr = block.mapped_ptr;
+                let kind = AllocationKind::DefaultPool {
                     memory_type_index,
-                    mapped_ptr: block.mapped_ptr,
-                    kind: AllocationKind::DefaultPool {
-                        memory_type_index,
-                        block_index: block_index as u32,
-                        tlsf_block_id: ta.block_id,
-                    },
+                    block_index: block_index as u32,
+                    tlsf_block_id: ta.block_id,
                 };
                 state.statistics.allocation_count += 1;
                 state.statistics.allocation_bytes += ta.size;
@@ -722,6 +822,16 @@ impl Allocator {
                     state.statistics.peak_allocation_bytes = state.statistics.allocation_bytes;
                 }
                 self.refresh_free_region_count(&mut state);
+                let alloc = make_allocation(
+                    &mut state,
+                    memory,
+                    ta.offset,
+                    ta.size,
+                    memory_type_index,
+                    mapped_ptr,
+                    kind,
+                    info.user_data,
+                );
                 return Ok(alloc);
             }
         }
@@ -762,18 +872,20 @@ impl Allocator {
         }
         self.refresh_free_region_count(&mut state);
 
-        Ok(Allocation {
+        Ok(make_allocation(
+            &mut state,
             memory,
-            offset: ta.offset,
-            size: ta.size,
+            ta.offset,
+            ta.size,
             memory_type_index,
             mapped_ptr,
-            kind: AllocationKind::DefaultPool {
+            AllocationKind::DefaultPool {
                 memory_type_index,
                 block_index,
                 tlsf_block_id: ta.block_id,
             },
-        })
+            info.user_data,
+        ))
     }
 
     /// Allocate from a specific custom pool.
@@ -799,66 +911,70 @@ impl Allocator {
             )
         };
 
-        // First try existing blocks.
-        let pool = state.custom_pools.get_mut(&handle.0).unwrap();
-        for (block_index, block) in pool.blocks.iter_mut().enumerate() {
-            match &mut block.strategy {
-                BlockStrategy::Tlsf(t) => {
-                    if let Some(ta) = t.allocate(requirements.size, requirements.alignment) {
-                        let alloc = Allocation {
-                            memory: block.memory,
-                            offset: ta.offset,
-                            size: ta.size,
-                            memory_type_index,
-                            mapped_ptr: block.mapped_ptr,
-                            kind: AllocationKind::CustomPool {
-                                pool_id: handle.0,
-                                block_index: block_index as u32,
-                                tlsf_block_id: ta.block_id,
-                            },
-                        };
-                        state.statistics.allocation_count += 1;
-                        state.statistics.allocation_bytes += ta.size;
-                        if state.statistics.allocation_bytes
-                            > state.statistics.peak_allocation_bytes
-                        {
-                            state.statistics.peak_allocation_bytes =
-                                state.statistics.allocation_bytes;
+        // First try existing blocks. We use indexed iteration so we can
+        // re-borrow `state` immutably between mutating the pool and
+        // calling make_allocation.
+        let block_count = state
+            .custom_pools
+            .get(&handle.0)
+            .map(|p| p.blocks.len())
+            .unwrap_or(0);
+        for block_index in 0..block_count {
+            // Borrow the block briefly, attempt the allocation, capture
+            // the result, and drop the borrow before touching state.
+            let attempt: Option<(VkDeviceMemory, *mut std::ffi::c_void, u64, u64, u32)> = {
+                let pool = state.custom_pools.get_mut(&handle.0).unwrap();
+                let block = &mut pool.blocks[block_index];
+                match &mut block.strategy {
+                    BlockStrategy::Tlsf(t) => {
+                        if let Some(ta) = t.allocate(requirements.size, requirements.alignment) {
+                            Some((
+                                block.memory,
+                                block.mapped_ptr,
+                                ta.offset,
+                                ta.size,
+                                ta.block_id,
+                            ))
+                        } else {
+                            None
                         }
-                        self.refresh_free_region_count(&mut state);
-                        return Ok(alloc);
+                    }
+                    BlockStrategy::Linear(l) => {
+                        if let Some(la) = l.allocate(requirements.size, requirements.alignment) {
+                            Some((block.memory, block.mapped_ptr, la.offset, la.size, 0))
+                        } else {
+                            None
+                        }
                     }
                 }
-                BlockStrategy::Linear(l) => {
-                    if let Some(la) = l.allocate(requirements.size, requirements.alignment) {
-                        let alloc = Allocation {
-                            memory: block.memory,
-                            offset: la.offset,
-                            size: la.size,
-                            memory_type_index,
-                            mapped_ptr: block.mapped_ptr,
-                            kind: AllocationKind::CustomPool {
-                                pool_id: handle.0,
-                                block_index: block_index as u32,
-                                tlsf_block_id: 0, // unused for linear
-                            },
-                        };
-                        state.statistics.allocation_count += 1;
-                        state.statistics.allocation_bytes += la.size;
-                        if state.statistics.allocation_bytes
-                            > state.statistics.peak_allocation_bytes
-                        {
-                            state.statistics.peak_allocation_bytes =
-                                state.statistics.allocation_bytes;
-                        }
-                        self.refresh_free_region_count(&mut state);
-                        return Ok(alloc);
-                    }
+            };
+
+            if let Some((memory, mapped_ptr, off, sz, tlsf_id)) = attempt {
+                state.statistics.allocation_count += 1;
+                state.statistics.allocation_bytes += sz;
+                if state.statistics.allocation_bytes > state.statistics.peak_allocation_bytes {
+                    state.statistics.peak_allocation_bytes = state.statistics.allocation_bytes;
                 }
+                self.refresh_free_region_count(&mut state);
+                return Ok(make_allocation(
+                    &mut state,
+                    memory,
+                    off,
+                    sz,
+                    memory_type_index,
+                    mapped_ptr,
+                    AllocationKind::CustomPool {
+                        pool_id: handle.0,
+                        block_index: block_index as u32,
+                        tlsf_block_id: tlsf_id,
+                    },
+                    info.user_data,
+                ));
             }
         }
 
         // Out of room — allocate a new block if we're allowed.
+        let pool = state.custom_pools.get_mut(&handle.0).unwrap();
         if max_blocks > 0 && pool.blocks.len() as u32 >= max_blocks {
             return Err(Error::Vk(VkResult::ERROR_OUT_OF_DEVICE_MEMORY));
         }
@@ -908,18 +1024,20 @@ impl Allocator {
         }
         self.refresh_free_region_count(&mut state);
 
-        Ok(Allocation {
+        Ok(make_allocation(
+            &mut state,
             memory,
-            offset: alloc_offset,
-            size: alloc_size,
+            alloc_offset,
+            alloc_size,
             memory_type_index,
             mapped_ptr,
-            kind: AllocationKind::CustomPool {
+            AllocationKind::CustomPool {
                 pool_id: handle.0,
                 block_index,
                 tlsf_block_id,
             },
-        })
+            info.user_data,
+        ))
     }
 
     /// Convenience: allocate memory and bind it to a freshly-created
@@ -952,8 +1070,8 @@ impl Allocator {
             bind(
                 self.inner.device.handle,
                 buffer.raw(),
-                allocation.memory,
-                allocation.offset,
+                allocation.memory(),
+                allocation.offset(),
             )
         })?;
         Ok((buffer, allocation))
@@ -983,8 +1101,8 @@ impl Allocator {
             bind(
                 self.inner.device.handle,
                 image.raw(),
-                allocation.memory,
-                allocation.offset,
+                allocation.memory(),
+                allocation.offset(),
             )
         })?;
         Ok((image, allocation))
@@ -1027,14 +1145,16 @@ impl Allocator {
             state.statistics.peak_allocation_bytes = state.statistics.allocation_bytes;
         }
 
-        Ok(Allocation {
+        Ok(make_allocation(
+            state,
             memory,
-            offset: 0,
-            size: requirements.size,
+            0,
+            requirements.size,
             memory_type_index,
             mapped_ptr,
-            kind: AllocationKind::Dedicated { id },
-        })
+            AllocationKind::Dedicated { id },
+            info.user_data,
+        ))
     }
 
     fn raw_allocate(&self, size: u64, memory_type_index: u32) -> Result<VkDeviceMemory> {
@@ -1185,6 +1305,244 @@ impl Allocator {
             // Safety: handle is valid; we are the sole owner.
             unsafe { free(self.inner.device.handle, block.memory, std::ptr::null()) };
         }
+    }
+}
+
+/// One source -> destination move computed by [`Allocator::build_defragmentation_plan`].
+///
+/// The user is responsible for issuing the GPU work that copies the
+/// data from `(src_memory, src_offset)` to `(dst_memory, dst_offset)`,
+/// destroying the old `VkBuffer`/`VkImage`, creating a new one bound to
+/// `(dst_memory, dst_offset)`, and waiting for the copy to complete
+/// before calling [`Allocator::apply_defragmentation_plan`]. The
+/// `user_data` field surfaces the value the caller attached at
+/// allocation time, so apps can map a move back to whichever buffer or
+/// image the allocation was bound to.
+#[derive(Debug, Clone)]
+pub struct DefragmentationMove {
+    pub allocation_id: u64,
+    pub user_data: u64,
+    pub size: u64,
+    pub src_memory: VkDeviceMemory,
+    pub src_offset: u64,
+    pub dst_memory: VkDeviceMemory,
+    pub dst_offset: u64,
+}
+
+/// A complete defragmentation plan returned by
+/// [`Allocator::build_defragmentation_plan`].
+#[derive(Debug, Clone, Default)]
+pub struct DefragmentationPlan {
+    /// The list of moves the user must execute on the GPU side. Each
+    /// entry has `src != dst`. The user issues a copy from src to dst
+    /// for each.
+    pub moves: Vec<DefragmentationMove>,
+    /// The complete target layout for every live allocation in the
+    /// pool, including ones that are already in the right place. The
+    /// allocator uses this internally to rebuild its TLSF state in
+    /// `apply_defragmentation_plan`. Exposed read-only via
+    /// [`total_layout`](Self::total_layout) for diagnostics.
+    pub(crate) total_layout: Vec<DefragmentationMove>,
+    /// The pool the plan was built for. `apply_defragmentation_plan`
+    /// uses this to know which pool to mutate.
+    pub(crate) pool_id: u64,
+    /// Estimated bytes that will be freed if every move is applied.
+    pub bytes_freed: u64,
+}
+
+impl DefragmentationPlan {
+    /// The complete target layout for every live allocation in the
+    /// pool, including allocations that are already in the right place.
+    /// Mostly useful for diagnostics; the [`moves`](Self::moves) field
+    /// is what most callers want.
+    pub fn total_layout(&self) -> &[DefragmentationMove] {
+        &self.total_layout
+    }
+}
+
+impl Allocator {
+    /// Compute a defragmentation plan for the given custom pool.
+    ///
+    /// The plan compacts every live allocation in the pool to the start
+    /// of the lowest-numbered block, ordered by `(block_index, offset)`.
+    ///
+    /// `pool` must be a `FreeList` (TLSF) custom pool. Linear pools
+    /// don't need defragmentation — call [`reset_pool`](Self::reset_pool)
+    /// to reclaim them in bulk.
+    ///
+    /// Returns an empty plan if the pool is unknown, is a Linear pool,
+    /// or has no live allocations.
+    pub fn build_defragmentation_plan(&self, pool: PoolHandle) -> DefragmentationPlan {
+        let mut state = self.inner.pools.lock().unwrap();
+        let p = match state.custom_pools.get_mut(&pool.0) {
+            Some(p) if p.strategy == AllocationStrategy::FreeList => p,
+            _ => return DefragmentationPlan::default(),
+        };
+
+        // Prune dead weak refs first.
+        p.live_allocations.retain(|w| w.upgrade().is_some());
+
+        // Snapshot every live allocation.
+        struct LiveAlloc {
+            arc: Arc<AllocationInner>,
+            current_memory: VkDeviceMemory,
+            current_offset: u64,
+            block_index: u32,
+            size: u64,
+        }
+
+        let mut lives: Vec<LiveAlloc> = Vec::new();
+        for w in &p.live_allocations {
+            let Some(arc) = w.upgrade() else {
+                continue;
+            };
+            let loc = arc.location.lock().unwrap();
+            let block_index = match &loc.kind {
+                AllocationKind::CustomPool { block_index, .. } => *block_index,
+                _ => continue,
+            };
+            lives.push(LiveAlloc {
+                current_memory: loc.memory,
+                current_offset: loc.offset,
+                block_index,
+                size: arc.size,
+                arc: Arc::clone(&arc),
+            });
+        }
+
+        // Sort by (block, offset) so the compaction is stable.
+        lives.sort_by_key(|l| (l.block_index, l.current_offset));
+
+        if p.blocks.is_empty() {
+            return DefragmentationPlan::default();
+        }
+        let target_memory = p.blocks[0].memory;
+
+        // Lay everything out at the start of block 0 in sequence,
+        // 256-byte aligned (TLSF's SMALL_BLOCK_SIZE).
+        let mut total_layout = Vec::new();
+        let mut moves = Vec::new();
+        let mut next_offset: u64 = 0;
+        let mut bytes_freed: u64 = 0;
+        const ALIGN: u64 = 256;
+
+        for live in &lives {
+            let aligned_next = (next_offset + ALIGN - 1) & !(ALIGN - 1);
+            let entry = DefragmentationMove {
+                allocation_id: live.arc.id,
+                user_data: live.arc.user_data,
+                size: live.size,
+                src_memory: live.current_memory,
+                src_offset: live.current_offset,
+                dst_memory: target_memory,
+                dst_offset: aligned_next,
+            };
+            let unchanged =
+                aligned_next == live.current_offset && target_memory == live.current_memory;
+            if !unchanged {
+                moves.push(entry.clone());
+                bytes_freed += live.size;
+            }
+            total_layout.push(entry);
+            next_offset = aligned_next + live.size;
+        }
+
+        DefragmentationPlan {
+            moves,
+            total_layout,
+            pool_id: pool.0,
+            bytes_freed,
+        }
+    }
+
+    /// Apply a previously computed defragmentation plan.
+    ///
+    /// **Preconditions** (the user must guarantee these):
+    /// - The user has issued GPU copy commands (e.g. via
+    ///   `vkCmdCopyBuffer`) for every entry in `plan.moves`.
+    /// - The user has destroyed their old `Buffer`/`Image` handles and
+    ///   created new ones bound to the `(dst_memory, dst_offset)` of
+    ///   each move (or rebound them via the existing handle if their
+    ///   API permits).
+    /// - The user has waited for that GPU work to complete (e.g. via
+    ///   `Fence::wait`).
+    /// - No other thread is racing on the affected `Allocation`s.
+    ///
+    /// After this call, every live `Allocation` in the pool returns its
+    /// new `(memory, offset)` from `Allocation::memory()` /
+    /// `Allocation::offset()`. The plan is consumed.
+    pub fn apply_defragmentation_plan(&self, plan: DefragmentationPlan) {
+        if plan.total_layout.is_empty() {
+            return;
+        }
+        let pool_id = plan.pool_id;
+        let mut state = self.inner.pools.lock().unwrap();
+
+        // Build an id -> Arc<AllocationInner> lookup so we can update
+        // every live allocation in this pool.
+        let mut by_id: HashMap<u64, Arc<AllocationInner>> = HashMap::new();
+        if let Some(pool) = state.custom_pools.get(&pool_id) {
+            for w in &pool.live_allocations {
+                if let Some(arc) = w.upgrade() {
+                    by_id.insert(arc.id, arc);
+                }
+            }
+        } else {
+            return;
+        }
+
+        // Reset every TLSF block in the pool. This invalidates every
+        // tlsf_block_id but leaves the underlying VkDeviceMemory alone.
+        if let Some(pool) = state.custom_pools.get_mut(&pool_id) {
+            for block in pool.blocks.iter_mut() {
+                if let BlockStrategy::Tlsf(ref mut t) = block.strategy {
+                    let cap = t.capacity();
+                    *t = Tlsf::new(cap);
+                }
+            }
+        }
+
+        // Re-allocate each entry in `total_layout` (both moved and
+        // unmoved) at its target position. The plan was built so the
+        // entries are sorted in ascending offset order, so TLSF will
+        // hand them back exactly the requested offsets.
+        for entry in &plan.total_layout {
+            // Find which block index the dst_memory corresponds to.
+            let target_block_index = if let Some(pool) = state.custom_pools.get(&pool_id) {
+                pool.blocks
+                    .iter()
+                    .position(|b| b.memory == entry.dst_memory)
+                    .map(|i| i as u32)
+            } else {
+                None
+            };
+            let Some(block_index) = target_block_index else {
+                continue;
+            };
+
+            // Allocate `size` bytes with the same 256-byte alignment
+            // build_defragmentation_plan used. TLSF will pick the
+            // lowest free offset, which matches what the plan computed.
+            const ALIGN: u64 = 256;
+            if let Some(pool) = state.custom_pools.get_mut(&pool_id)
+                && let BlockStrategy::Tlsf(ref mut t) = pool.blocks[block_index as usize].strategy
+                && let Some(ta) = t.allocate(entry.size, ALIGN)
+                && let Some(arc) = by_id.get(&entry.allocation_id)
+            {
+                let mut loc = arc.location.lock().unwrap();
+                loc.memory = entry.dst_memory;
+                loc.offset = ta.offset;
+                loc.kind = AllocationKind::CustomPool {
+                    pool_id,
+                    block_index,
+                    tlsf_block_id: ta.block_id,
+                };
+                // mapped_ptr stays the same — same block, same parent
+                // mapping.
+            }
+        }
+
+        self.refresh_free_region_count(&mut state);
     }
 }
 
