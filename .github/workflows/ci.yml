@@ -79,6 +79,7 @@ jobs:
           cargo build -p spock --features fetch-spec --example compute_square
           cargo build -p spock --features fetch-spec --example compute_image_invert
           cargo build -p spock --features fetch-spec --example headless_triangle
+          cargo build -p spock --features fetch-spec --example windowed_triangle
           cargo build -p spock --features fetch-spec,naga --example compile_shader
 
       - name: Run examples on Linux (with Lavapipe)

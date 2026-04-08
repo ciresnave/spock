@@ -35,6 +35,12 @@ naga = { version = "29", optional = true, default-features = false, features = [
 vulkan_gen = { path = "../vulkan_gen" }
 ureq = "3"
 
+# Example-only dependencies. Not pulled into the spock crate's own
+# build — only when building the bundled examples that need them.
+[dev-dependencies]
+winit = "0.30"
+raw-window-handle = "0.6"
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
