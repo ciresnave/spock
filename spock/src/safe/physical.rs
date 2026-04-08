@@ -183,6 +183,50 @@ impl PhysicalDevice {
         None
     }
 
+    /// Enumerate the supported cooperative matrix shapes (`VK_KHR_cooperative_matrix`).
+    ///
+    /// Cooperative matrices are GPU primitives for matrix-multiply-and-
+    /// accumulate operations — the building block of modern ML and
+    /// signal-processing workloads. Each [`CooperativeMatrixProperties`]
+    /// entry describes one supported `(M, N, K, A_type, B_type, C_type,
+    /// Result_type)` shape that the device's compute units can execute
+    /// natively.
+    ///
+    /// Returns an empty `Vec` if the device does not expose
+    /// `VK_KHR_cooperative_matrix`. The extension must be enabled at
+    /// instance creation time for this query to succeed.
+    pub fn cooperative_matrix_properties(&self) -> Vec<CooperativeMatrixProperties> {
+        let Some(get) = self
+            .instance
+            .dispatch
+            .vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR
+        else {
+            return Vec::new();
+        };
+        let mut count: u32 = 0;
+        // Safety: count query, output ptr is null.
+        if unsafe { get(self.handle, &mut count, std::ptr::null_mut()) } != VkResult::SUCCESS {
+            return Vec::new();
+        }
+        // Note: cannot use `mem::zeroed()` here because `VkScopeKHR` has
+        // no zero variant and the generated `Default` produces
+        // `SCOPE_DEVICE_KHR`. Initialize via the per-struct Default impl
+        // and patch sType in one shot.
+        let mut raw: Vec<VkCooperativeMatrixPropertiesKHR> = (0..count as usize)
+            .map(|_| VkCooperativeMatrixPropertiesKHR {
+                sType: VkStructureType::STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR,
+                ..Default::default()
+            })
+            .collect();
+        // Safety: raw has space for `count` elements.
+        if unsafe { get(self.handle, &mut count, raw.as_mut_ptr()) } != VkResult::SUCCESS {
+            return Vec::new();
+        }
+        raw.into_iter()
+            .map(|r| CooperativeMatrixProperties { raw: r })
+            .collect()
+    }
+
     /// The number of nanoseconds per timestamp tick on this device.
     ///
     /// `vkCmdWriteTimestamp` writes a `u64` count of implementation-defined
@@ -415,6 +459,60 @@ impl MemoryHeapFlags {
 
     pub const fn contains(self, other: Self) -> bool {
         (self.0 & other.0) == other.0
+    }
+}
+
+/// One supported cooperative-matrix shape, as returned by
+/// [`PhysicalDevice::cooperative_matrix_properties`].
+#[derive(Clone)]
+pub struct CooperativeMatrixProperties {
+    raw: VkCooperativeMatrixPropertiesKHR,
+}
+
+impl CooperativeMatrixProperties {
+    pub fn m_size(&self) -> u32 {
+        self.raw.MSize
+    }
+    pub fn n_size(&self) -> u32 {
+        self.raw.NSize
+    }
+    pub fn k_size(&self) -> u32 {
+        self.raw.KSize
+    }
+    /// Component type of operand A. The value is the raw
+    /// `VkComponentTypeKHR` enum.
+    pub fn a_type(&self) -> VkComponentTypeKHR {
+        self.raw.AType
+    }
+    pub fn b_type(&self) -> VkComponentTypeKHR {
+        self.raw.BType
+    }
+    pub fn c_type(&self) -> VkComponentTypeKHR {
+        self.raw.CType
+    }
+    pub fn result_type(&self) -> VkComponentTypeKHR {
+        self.raw.ResultType
+    }
+    /// Whether the implementation saturates accumulator overflow.
+    pub fn saturating_accumulation(&self) -> bool {
+        self.raw.saturatingAccumulation != 0
+    }
+    pub fn scope(&self) -> VkScopeKHR {
+        self.raw.scope
+    }
+}
+
+impl std::fmt::Debug for CooperativeMatrixProperties {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CooperativeMatrixProperties")
+            .field("M", &self.m_size())
+            .field("N", &self.n_size())
+            .field("K", &self.k_size())
+            .field("AType", &self.a_type())
+            .field("BType", &self.b_type())
+            .field("CType", &self.c_type())
+            .field("ResultType", &self.result_type())
+            .finish()
     }
 }
 

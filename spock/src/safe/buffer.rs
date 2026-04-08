@@ -19,6 +19,11 @@ impl BufferUsage {
     pub const INDEX_BUFFER: Self = Self(0x40);
     pub const VERTEX_BUFFER: Self = Self(0x80);
     pub const INDIRECT_BUFFER: Self = Self(0x100);
+    /// `VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT` — required to call
+    /// [`Buffer::device_address`]. Requires Vulkan 1.2 (or
+    /// `VK_KHR_buffer_device_address` on 1.0/1.1) and the
+    /// `bufferDeviceAddress` device feature.
+    pub const SHADER_DEVICE_ADDRESS: Self = Self(0x20000);
 
     pub const fn contains(self, other: Self) -> bool {
         (self.0 & other.0) == other.0
@@ -140,6 +145,37 @@ impl Buffer {
             .ok_or(Error::MissingFunction("vkBindBufferMemory"))?;
         // Safety: handles are valid, offset is in bounds (caller is responsible).
         check(unsafe { bind(self.device.handle, self.handle, memory.handle, offset) })
+    }
+
+    /// Return the GPU virtual address of this buffer (its base byte
+    /// address as the GPU would see it via `OpLoadDeviceAddress` /
+    /// `buffer_reference` in shaders).
+    ///
+    /// Requires:
+    /// - The buffer to have been created with
+    ///   [`BufferUsage::SHADER_DEVICE_ADDRESS`].
+    /// - The device to have been created with the `bufferDeviceAddress`
+    ///   feature enabled.
+    /// - Vulkan 1.2 (the function is core in 1.2) or
+    ///   `VK_KHR_buffer_device_address` enabled on 1.0/1.1.
+    ///
+    /// Returns an error wrapping `MissingFunction` when the function
+    /// pointer isn't loaded — most commonly because the feature wasn't
+    /// enabled at device creation time.
+    pub fn device_address(&self) -> Result<u64> {
+        let get = self
+            .device
+            .dispatch
+            .vkGetBufferDeviceAddress
+            .ok_or(Error::MissingFunction("vkGetBufferDeviceAddress"))?;
+        let info = VkBufferDeviceAddressInfo {
+            sType: VkStructureType::STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            buffer: self.handle,
+            ..Default::default()
+        };
+        // Safety: info is valid for the call.
+        let addr = unsafe { get(self.device.handle, &info) };
+        Ok(addr)
     }
 }
 
