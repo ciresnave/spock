@@ -43,8 +43,8 @@ Spock exposes Vulkan through two complementary APIs:
     image / combined image sampler), `ShaderModule` (takes `&[u32]` SPIR-V), with an
     optional `naga` feature for GLSL → SPIR-V at runtime.
   - **Graphics** — `RenderPass`, `Framebuffer`, `GraphicsPipeline` (with a focused
-    `GraphicsPipelineBuilder`), `Surface` (Win32 / Wayland / Metal), `Swapchain`
-    with the standard acquire / submit / present semaphore loop.
+    `GraphicsPipelineBuilder`), `Surface` (Win32 / Wayland / Xlib / Xcb / Metal),
+    `Swapchain` with the standard acquire / submit / present semaphore loop.
   - **Synchronization** — `Fence`, `Semaphore` (binary and timeline), command-buffer
     `memory_barrier` / `image_barrier` plus their `Synchronization2` 64-bit
     counterparts, `QueryPool` (timestamps + pipeline statistics), and the Vulkan 1.2
@@ -113,6 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             queue_family_index: qf,
             queue_priorities: vec![1.0],
         }],
+        ..Default::default()
     })?;
     let queue = device.get_queue(qf, 0);
 
@@ -155,9 +156,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | [`fill_buffer`](spock/examples/fill_buffer.rs) | Safe-API: full host→GPU→host round trip via `vkCmdFillBuffer` |
 | [`compute_square`](spock/examples/compute_square.rs) | Safe-API: complete compute path — load SPIR-V, descriptor set, compute pipeline, dispatch, verify the GPU squared every element |
 | [`compute_image_invert`](spock/examples/compute_image_invert.rs) | Safe-API: 2D storage image compute — RGBA8 round trip with layout transitions, copy buffer↔image, dispatch invert shader, verify per-pixel |
-| [`compile_shader`](spock/examples/compile_shader.rs) (`--features naga`) | Compile every `*.comp` / `*.vert` / `*.frag` under `examples/shaders/` to SPIR-V using the optional `naga` feature |
+| [`compile_shader`](spock/examples/compile_shader.rs) (`--features naga`) | Compile every `*.comp` / `*.vert` / `*.frag` / `*.wgsl` under `examples/shaders/` to SPIR-V using the optional `naga` feature |
 | [`headless_triangle`](spock/examples/headless_triangle.rs) | Safe-API: full graphics pipeline — render pass, framebuffer, graphics pipeline, vertex/fragment shaders, draw, copy back, verify pixels were rasterized |
-| [`windowed_triangle`](spock/examples/windowed_triangle.rs) | Safe-API: opens a real OS window via `winit`, creates a Win32/Wayland/Metal surface, builds a swapchain, and runs the standard acquire/submit/present loop with two frames in flight |
+| [`textured_quad`](spock/examples/textured_quad.rs) | Safe-API: headless textured quad — upload a 4×4 RGBA8 checkerboard, sample it with a `Sampler` from a WGSL fragment shader (separated `SAMPLED_IMAGE` + `SAMPLER` descriptors), verify the rendered pixels picked up the texture colors |
+| [`windowed_triangle`](spock/examples/windowed_triangle.rs) | Safe-API: opens a real OS window via `winit`, creates a Win32 / Wayland / Xlib / Xcb / Metal surface, builds a swapchain, and runs the standard acquire/submit/present loop with two frames in flight |
 
 The compute examples and the headless triangle run in CI on every platform via Mesa
 Lavapipe; the windowed triangle is built but not run in CI (it requires a display
@@ -247,7 +249,7 @@ Everything in this table is derived entirely from `vk.xml` at build time:
 | --- | --- |
 | `build-support` (default) | Enables XML parsing and code generation during build |
 | `fetch-spec` | Enables automatic download of `vk.xml` from the Khronos GitHub repository |
-| `naga` | Pulls in `naga` 29 with `glsl-in` + `spv-out` only. Exposes `spock::safe::naga::compile_glsl(source, stage) -> Vec<u32>` for runtime GLSL→SPIR-V compilation. Disabled by default — users with their own SPIR-V pay nothing. |
+| `naga` | Pulls in `naga` 29 with `glsl-in` + `wgsl-in` + `spv-out` only. Exposes `spock::safe::naga::compile_glsl(source, stage)` and `compile_wgsl(source)` for runtime GLSL/WGSL → SPIR-V compilation. Disabled by default — users with their own SPIR-V pay nothing. |
 
 ## Loader API
 

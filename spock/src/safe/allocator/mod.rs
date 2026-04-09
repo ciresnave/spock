@@ -183,8 +183,10 @@ pub struct AllocationCreateInfo {
     /// "default".
     ///
     /// Only meaningful when the [`Device`] was created from a multi-GPU
-    /// `PhysicalDeviceGroup` via [`Device::new_group`]. On a single-device
-    /// group it's a no-op (the driver always uses device 0).
+    /// [`PhysicalDeviceGroup`](super::PhysicalDeviceGroup) via
+    /// [`PhysicalDeviceGroup::create_device`](super::PhysicalDeviceGroup::create_device).
+    /// On a single-device group it's a no-op (the driver always uses
+    /// device 0).
     pub device_mask: Option<u32>,
 }
 
