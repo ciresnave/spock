@@ -24,10 +24,10 @@
 //!   cargo run -p vulkane --features naga,fetch-spec --example compile_shader
 
 use vulkane::safe::{
-    ApiVersion, Buffer, BufferCreateInfo, BufferUsage, CommandPool, ComputePipeline,
+    AccessFlags, ApiVersion, Buffer, BufferCreateInfo, BufferUsage, CommandPool, ComputePipeline,
     DescriptorPool, DescriptorPoolSize, DescriptorSetLayout, DescriptorSetLayoutBinding,
     DescriptorType, DeviceCreateInfo, DeviceMemory, Fence, Instance, InstanceCreateInfo,
-    MemoryPropertyFlags, PipelineLayout, QueueCreateInfo, QueueFlags, ShaderModule,
+    MemoryPropertyFlags, PipelineLayout, PipelineStage, QueueCreateInfo, QueueFlags, ShaderModule,
     ShaderStageFlags,
 };
 
@@ -79,10 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let queue_family_index = physical.find_queue_family(QueueFlags::COMPUTE).unwrap();
     let device = physical.create_device(DeviceCreateInfo {
-        queue_create_infos: &[QueueCreateInfo {
-            queue_family_index,
-            queue_priorities: vec![1.0],
-        }],
+        queue_create_infos: &[QueueCreateInfo::single(queue_family_index)],
         ..Default::default()
     })?;
     let queue = device.get_queue(queue_family_index, 0);
@@ -176,11 +173,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.dispatch(group_count_x, 1, 1);
 
         // Memory barrier so the host read after fence wait sees the GPU writes.
-        // VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT = 0x800
-        // VK_PIPELINE_STAGE_HOST_BIT           = 0x4000
-        // VK_ACCESS_SHADER_WRITE_BIT           = 0x40
-        // VK_ACCESS_HOST_READ_BIT              = 0x2000
-        rec.memory_barrier(0x800, 0x4000, 0x40, 0x2000);
+        rec.memory_barrier(PipelineStage::COMPUTE_SHADER, PipelineStage::HOST, AccessFlags::SHADER_WRITE, AccessFlags::HOST_READ);
 
         rec.end()?;
     }

@@ -82,6 +82,7 @@ mod device;
 mod features;
 mod graphics_pipeline;
 mod image;
+mod flags;
 mod instance;
 mod memory;
 #[cfg(feature = "naga")]
@@ -112,6 +113,7 @@ pub use device::{
     Device, DeviceCreateInfo, Queue, QueueCreateInfo, SignalSemaphore, WaitSemaphore,
 };
 pub use features::DeviceFeatures;
+pub use flags::{AccessFlags, AccessFlags2, PipelineStage, PipelineStage2};
 pub use graphics_pipeline::{
     CullMode, FrontFace, GraphicsPipeline, GraphicsPipelineBuilder, GraphicsShaderStage,
     PolygonMode, PrimitiveTopology, VertexInputAttribute, VertexInputBinding,

@@ -61,10 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a logical device with one queue from that family.
     let device = physical.create_device(DeviceCreateInfo {
-        queue_create_infos: &[QueueCreateInfo {
-            queue_family_index,
-            queue_priorities: vec![1.0],
-        }],
+        queue_create_infos: &[QueueCreateInfo::single(queue_family_index)],
         ..Default::default()
     })?;
     let queue = device.get_queue(queue_family_index, 0);

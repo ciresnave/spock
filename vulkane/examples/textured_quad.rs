@@ -30,14 +30,14 @@
 //! Run with: `cargo run -p vulkane --features fetch-spec --example textured_quad`
 
 use vulkane::safe::{
-    ApiVersion, AttachmentDescription, AttachmentLoadOp, AttachmentStoreOp, Buffer,
-    BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool, DescriptorPool,
-    DescriptorPoolSize, DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType,
-    DeviceCreateInfo, DeviceMemory, Fence, Format, Framebuffer, GraphicsPipelineBuilder,
-    GraphicsShaderStage, Image, Image2dCreateInfo, ImageBarrier, ImageLayout, ImageUsage,
-    ImageView, Instance, InstanceCreateInfo, MemoryPropertyFlags, PipelineLayout,
-    PrimitiveTopology, QueueCreateInfo, QueueFlags, RenderPass, RenderPassCreateInfo, Sampler,
-    SamplerCreateInfo, ShaderModule, ShaderStageFlags,
+    AccessFlags, ApiVersion, AttachmentLoadOp, AttachmentStoreOp, Buffer, BufferCreateInfo,
+    BufferImageCopy, BufferUsage, CommandPool, DescriptorPool, DescriptorPoolSize,
+    DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType, DeviceCreateInfo,
+    DeviceMemory, Fence, Format, Framebuffer, GraphicsPipelineBuilder, GraphicsShaderStage, Image,
+    Image2dCreateInfo, ImageBarrier, ImageLayout, ImageUsage, ImageView, Instance,
+    InstanceCreateInfo, MemoryPropertyFlags, PipelineLayout, PipelineStage, PrimitiveTopology,
+    QueueCreateInfo, QueueFlags, RenderPass, Sampler, SamplerCreateInfo, ShaderModule,
+    ShaderStageFlags,
 };
 
 const W: u32 = 256;
@@ -49,14 +49,6 @@ const TEX_W: u32 = 4;
 const TEX_H: u32 = 4;
 const TEX_BYTES: u64 = (TEX_W as u64) * (TEX_H as u64) * PIXEL_BYTES;
 
-// Pipeline-stage / access constants we need.
-const TOP_OF_PIPE: u32 = 0x1;
-const TRANSFER: u32 = 0x1000;
-const FRAGMENT_SHADER: u32 = 0x80;
-const HOST: u32 = 0x4000;
-const ACCESS_SHADER_READ: u32 = 0x20;
-const ACCESS_TRANSFER_WRITE: u32 = 0x1000;
-const ACCESS_HOST_READ: u32 = 0x2000;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Load multi-entry-point SPIR-V.
@@ -97,10 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let queue_family_index = physical.find_queue_family(QueueFlags::GRAPHICS).unwrap();
     let device = physical.create_device(DeviceCreateInfo {
-        queue_create_infos: &[QueueCreateInfo {
-            queue_family_index,
-            queue_priorities: vec![1.0],
-        }],
+        queue_create_infos: &[QueueCreateInfo::single(queue_family_index)],
         ..Default::default()
     })?;
     let queue = device.get_queue(queue_family_index, 0);
@@ -190,18 +179,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[OK] Created {W}x{H} color attachment");
 
     // 7. Render pass + framebuffer.
-    let render_pass = RenderPass::new(
+    let render_pass = RenderPass::simple_color(
         &device,
-        RenderPassCreateInfo {
-            color_attachments: &[AttachmentDescription {
-                format: Format::R8G8B8A8_UNORM,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::TRANSFER_SRC_OPTIMAL,
-            }],
-            depth_attachment: None,
-        },
+        Format::R8G8B8A8_UNORM,
+        AttachmentLoadOp::CLEAR,
+        AttachmentStoreOp::STORE,
+        ImageLayout::TRANSFER_SRC_OPTIMAL,
     )?;
     let framebuffer = Framebuffer::new(&device, &render_pass, &[&color_view], W, H)?;
 
@@ -281,14 +264,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Texture: UNDEFINED -> TRANSFER_DST
         rec.image_barrier(
-            TOP_OF_PIPE,
-            TRANSFER,
+            PipelineStage::TOP_OF_PIPE,
+            PipelineStage::TRANSFER,
             ImageBarrier {
                 image: &texture,
                 old_layout: ImageLayout::UNDEFINED,
                 new_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-                src_access: 0,
-                dst_access: ACCESS_TRANSFER_WRITE,
+                src_access: AccessFlags::NONE,
+                dst_access: AccessFlags::TRANSFER_WRITE,
             },
         );
         // Upload texture from staging buffer.
@@ -300,14 +283,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         // Texture: TRANSFER_DST -> SHADER_READ_ONLY (for the fragment stage)
         rec.image_barrier(
-            TRANSFER,
-            FRAGMENT_SHADER,
+            PipelineStage::TRANSFER,
+            PipelineStage::FRAGMENT_SHADER,
             ImageBarrier {
                 image: &texture,
                 old_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
                 new_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                src_access: ACCESS_TRANSFER_WRITE,
-                dst_access: ACCESS_SHADER_READ,
+                src_access: AccessFlags::TRANSFER_WRITE,
+                dst_access: AccessFlags::SHADER_READ,
             },
         );
 
@@ -327,7 +310,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[BufferImageCopy::full_2d(W, H)],
         );
         // Transfer -> Host so the host read sees the bytes.
-        rec.memory_barrier(TRANSFER, HOST, ACCESS_TRANSFER_WRITE, ACCESS_HOST_READ);
+        rec.memory_barrier(PipelineStage::TRANSFER, PipelineStage::HOST, AccessFlags::TRANSFER_WRITE, AccessFlags::HOST_READ);
 
         rec.end()?;
     }

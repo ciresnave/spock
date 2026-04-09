@@ -21,11 +21,11 @@
 //! Run with: `cargo run -p vulkane --features fetch-spec --example headless_triangle`
 
 use vulkane::safe::{
-    ApiVersion, Buffer, BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool,
-    DeviceCreateInfo, DeviceMemory, Fence, Format, Framebuffer, GraphicsPipelineBuilder,
-    GraphicsShaderStage, Image, Image2dCreateInfo, ImageBarrier, ImageLayout, ImageUsage,
-    ImageView, Instance, InstanceCreateInfo, MemoryPropertyFlags, PipelineLayout, QueueCreateInfo,
-    QueueFlags, RenderPass, RenderPassCreateInfo, ShaderModule,
+    AccessFlags, ApiVersion, AttachmentLoadOp, AttachmentStoreOp, Buffer, BufferCreateInfo,
+    BufferImageCopy, BufferUsage, CommandPool, DeviceCreateInfo, DeviceMemory, Fence, Format,
+    Framebuffer, GraphicsPipelineBuilder, GraphicsShaderStage, Image, Image2dCreateInfo,
+    ImageLayout, ImageUsage, ImageView, Instance, InstanceCreateInfo, MemoryPropertyFlags,
+    PipelineLayout, PipelineStage, QueueCreateInfo, QueueFlags, RenderPass, ShaderModule,
 };
 
 const W: u32 = 256;
@@ -33,14 +33,6 @@ const H: u32 = 256;
 const PIXEL_BYTES: u64 = 4;
 const BUF_SIZE: u64 = (W as u64) * (H as u64) * PIXEL_BYTES;
 
-const TOP_OF_PIPE: u32 = 0x1;
-const TRANSFER: u32 = 0x1000;
-const COLOR_ATTACHMENT_OUTPUT: u32 = 0x400;
-const HOST: u32 = 0x4000;
-const ACCESS_TRANSFER_READ: u32 = 0x800;
-const ACCESS_TRANSFER_WRITE: u32 = 0x1000;
-const ACCESS_HOST_READ: u32 = 0x2000;
-const ACCESS_COLOR_ATTACHMENT_WRITE: u32 = 0x100;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Load shaders.
@@ -79,10 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let queue_family_index = physical.find_queue_family(QueueFlags::GRAPHICS).unwrap();
     let device = physical.create_device(DeviceCreateInfo {
-        queue_create_infos: &[QueueCreateInfo {
-            queue_family_index,
-            queue_priorities: vec![1.0],
-        }],
+        queue_create_infos: &[QueueCreateInfo::single(queue_family_index)],
         ..Default::default()
     })?;
     let queue = device.get_queue(queue_family_index, 0);
@@ -111,18 +100,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Render pass: one color attachment, clear on load, store on end,
     //    UNDEFINED -> TRANSFER_SRC_OPTIMAL so we can copy out at the end.
-    let render_pass = RenderPass::new(
+    let render_pass = RenderPass::simple_color(
         &device,
-        RenderPassCreateInfo {
-            color_attachments: &[vulkane::safe::AttachmentDescription {
-                format: Format::R8G8B8A8_UNORM,
-                load_op: vulkane::safe::AttachmentLoadOp::CLEAR,
-                store_op: vulkane::safe::AttachmentStoreOp::STORE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::TRANSFER_SRC_OPTIMAL,
-            }],
-            depth_attachment: None,
-        },
+        Format::R8G8B8A8_UNORM,
+        AttachmentLoadOp::CLEAR,
+        AttachmentStoreOp::STORE,
+        ImageLayout::TRANSFER_SRC_OPTIMAL,
     )?;
     let framebuffer = Framebuffer::new(&device, &render_pass, &[&view], W, H)?;
     println!("[OK] Created render pass + framebuffer");
@@ -181,16 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[BufferImageCopy::full_2d(W, H)],
         );
         // Transfer -> Host
-        rec.memory_barrier(TRANSFER, HOST, ACCESS_TRANSFER_WRITE, ACCESS_HOST_READ);
-
-        // Suppress unused-import warnings for the access constants.
-        let _ = (
-            TOP_OF_PIPE,
-            COLOR_ATTACHMENT_OUTPUT,
-            ACCESS_TRANSFER_READ,
-            ACCESS_COLOR_ATTACHMENT_WRITE,
-        );
-        let _: ImageBarrier;
+        rec.memory_barrier(PipelineStage::TRANSFER, PipelineStage::HOST, AccessFlags::TRANSFER_WRITE, AccessFlags::HOST_READ);
 
         rec.end()?;
     }

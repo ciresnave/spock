@@ -1,8 +1,9 @@
 //! Safe wrapper for `VkDevice` and `VkQueue`.
 
 use super::features::DeviceFeatures;
+use super::flags::PipelineStage;
 use super::physical::PhysicalDevice;
-use super::sync::Semaphore;
+use super::sync::{Fence, Semaphore};
 use super::{Error, Result, check};
 use crate::raw::VulkanLibrary;
 use crate::raw::bindings::*;
@@ -13,8 +14,9 @@ use std::sync::Arc;
 ///
 /// `value` is ignored for binary semaphores; for timeline semaphores it
 /// is the counter value the wait must reach before the submission may
-/// proceed. `dst_stage_mask` is the `VK_PIPELINE_STAGE_*` mask
-/// of stages that need to wait.
+/// proceed. `dst_stage_mask` selects the pipeline stages that must
+/// wait for the semaphore (e.g.
+/// [`PipelineStage::COLOR_ATTACHMENT_OUTPUT`]).
 ///
 /// `device_index` selects which physical device in a [`Device`] group
 /// the wait happens on. `0` is the right choice for non-group devices
@@ -25,7 +27,7 @@ use std::sync::Arc;
 pub struct WaitSemaphore<'a> {
     pub semaphore: &'a Semaphore,
     pub value: u64,
-    pub dst_stage_mask: u32,
+    pub dst_stage_mask: PipelineStage,
     /// Physical-device index inside the [`Device`] group. Defaults to `0`.
     pub device_index: u32,
 }
@@ -52,6 +54,66 @@ pub struct QueueCreateInfo {
     /// Priority for each queue, in the range `[0.0, 1.0]`.
     /// The number of queues to create equals `queue_priorities.len()`.
     pub queue_priorities: Vec<f32>,
+}
+
+impl QueueCreateInfo {
+    /// Create a single queue with priority 1.0 from the given family.
+    ///
+    /// This is the right choice 90% of the time — most applications
+    /// need exactly one queue from one family.
+    pub fn single(queue_family_index: u32) -> Self {
+        Self {
+            queue_family_index,
+            queue_priorities: vec![1.0],
+        }
+    }
+}
+
+impl WaitSemaphore<'_> {
+    /// Wait on a binary semaphore at the given pipeline stage.
+    pub fn binary(semaphore: &Semaphore, dst_stage: PipelineStage) -> WaitSemaphore<'_> {
+        WaitSemaphore {
+            semaphore,
+            value: 0,
+            dst_stage_mask: dst_stage,
+            device_index: 0,
+        }
+    }
+
+    /// Wait on a timeline semaphore to reach `value` at the given
+    /// pipeline stage.
+    pub fn timeline(
+        semaphore: &Semaphore,
+        value: u64,
+        dst_stage: PipelineStage,
+    ) -> WaitSemaphore<'_> {
+        WaitSemaphore {
+            semaphore,
+            value,
+            dst_stage_mask: dst_stage,
+            device_index: 0,
+        }
+    }
+}
+
+impl SignalSemaphore<'_> {
+    /// Signal a binary semaphore on completion.
+    pub fn binary(semaphore: &Semaphore) -> SignalSemaphore<'_> {
+        SignalSemaphore {
+            semaphore,
+            value: 0,
+            device_index: 0,
+        }
+    }
+
+    /// Signal a timeline semaphore with the given value on completion.
+    pub fn timeline(semaphore: &Semaphore, value: u64) -> SignalSemaphore<'_> {
+        SignalSemaphore {
+            semaphore,
+            value,
+            device_index: 0,
+        }
+    }
 }
 
 /// Parameters for [`PhysicalDevice::create_device`].
@@ -350,6 +412,18 @@ impl Device {
         }
     }
 
+    /// Returns a reference to the device-level Vulkan dispatch table.
+    ///
+    /// Use this to call raw Vulkan functions that the safe wrapper
+    /// doesn't cover yet. Each field is an `Option<fn_ptr>` — `None`
+    /// if the driver doesn't expose it, `Some` if callable.
+    ///
+    /// Combine with [`.raw()`](Self::raw) to get the raw `VkDevice`
+    /// handle for the first argument.
+    pub fn dispatch(&self) -> &VkDeviceDispatchTable {
+        &self.inner.dispatch
+    }
+
     /// Returns the raw `VkDevice` handle.
     pub fn raw(&self) -> VkDevice {
         self.inner.handle
@@ -507,7 +581,7 @@ impl Queue {
 
         let raw_wait: Vec<VkSemaphore> =
             wait_semaphores.iter().map(|w| w.semaphore.raw()).collect();
-        let raw_wait_stages: Vec<u32> = wait_semaphores.iter().map(|w| w.dst_stage_mask).collect();
+        let raw_wait_stages: Vec<u32> = wait_semaphores.iter().map(|w| w.dst_stage_mask.0).collect();
         let raw_wait_values: Vec<u64> = wait_semaphores.iter().map(|w| w.value).collect();
         let raw_wait_device_indices: Vec<u32> =
             wait_semaphores.iter().map(|w| w.device_index).collect();
@@ -646,5 +720,36 @@ impl Queue {
             .ok_or(Error::MissingFunction("vkQueueWaitIdle"))?;
         // Safety: queue handle is valid.
         check(unsafe { wait(self.handle) })
+    }
+
+    /// Record commands in a one-shot command buffer, submit, and wait
+    /// for completion before returning.
+    ///
+    /// This is the simplest way to do fire-and-forget GPU work like
+    /// uploading data, issuing layout transitions, or running a single
+    /// compute dispatch. The command pool, command buffer, and fence
+    /// are created and destroyed internally.
+    ///
+    /// ```ignore
+    /// queue.one_shot(&device, queue_family, |rec| {
+    ///     rec.copy_buffer(&staging, &device_buf, &[BufferCopy::full(size)]);
+    ///     Ok(())
+    /// })?;
+    /// ```
+    pub fn one_shot<F>(&self, device: &Device, queue_family_index: u32, record: F) -> Result<()>
+    where
+        F: FnOnce(&mut super::CommandBufferRecording<'_>) -> Result<()>,
+    {
+        let pool = super::CommandPool::new(device, queue_family_index)?;
+        let mut cmd = pool.allocate_primary()?;
+        {
+            let mut rec = cmd.begin()?;
+            record(&mut rec)?;
+            rec.end()?;
+        }
+        let fence = Fence::new(device)?;
+        self.submit(&[&cmd], Some(&fence))?;
+        fence.wait(u64::MAX)?;
+        Ok(())
     }
 }

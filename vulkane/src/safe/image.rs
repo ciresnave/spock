@@ -476,6 +476,6 @@ pub struct ImageBarrier<'a> {
     pub image: &'a Image,
     pub old_layout: ImageLayout,
     pub new_layout: ImageLayout,
-    pub src_access: u32,
-    pub dst_access: u32,
+    pub src_access: super::AccessFlags,
+    pub dst_access: super::AccessFlags,
 }

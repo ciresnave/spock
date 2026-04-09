@@ -4,16 +4,17 @@
 //! Skips gracefully on systems without Vulkan installed.
 
 use vulkane::safe::{
-    AllocationCreateInfo, AllocationStrategy, AllocationUsage, Allocator, ApiVersion, Buffer,
-    BufferCopy, BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool, ComputePipeline,
-    DEBUG_UTILS_EXTENSION, DebugMessage, DebugMessageSeverity, DefragmentationMove,
-    DefragmentationPlan, DescriptorPool, DescriptorPoolSize, DescriptorSetLayout,
-    DescriptorSetLayoutBinding, DescriptorType, DeviceCreateInfo, DeviceFeatures, DeviceMemory,
-    Fence, Format, Image, Image2dCreateInfo, ImageBarrier, ImageLayout, ImageUsage, ImageView,
-    Instance, InstanceCreateInfo, KHRONOS_VALIDATION_LAYER, MemoryPropertyFlags, PipelineCache,
-    PipelineLayout, PipelineStatisticsFlags, PoolCreateInfo, PushConstantRange, QueryPool,
-    QueueCreateInfo, QueueFlags, Semaphore, SemaphoreKind, ShaderModule, ShaderStageFlags,
-    SignalSemaphore, SpecializationConstants, WaitSemaphore,
+    AccessFlags, AccessFlags2, AllocationCreateInfo, AllocationStrategy, AllocationUsage, Allocator,
+    ApiVersion, Buffer, BufferCopy, BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool,
+    ComputePipeline, DEBUG_UTILS_EXTENSION, DebugMessage, DebugMessageSeverity,
+    DefragmentationMove, DefragmentationPlan, DescriptorPool, DescriptorPoolSize,
+    DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType, DeviceCreateInfo,
+    DeviceFeatures, DeviceMemory, Fence, Format, Image, Image2dCreateInfo, ImageBarrier,
+    ImageLayout, ImageUsage, ImageView, Instance, InstanceCreateInfo, KHRONOS_VALIDATION_LAYER,
+    MemoryPropertyFlags, PipelineCache, PipelineLayout, PipelineStage, PipelineStage2,
+    PipelineStatisticsFlags, PoolCreateInfo, PushConstantRange, QueryPool, QueueCreateInfo,
+    QueueFlags, Semaphore, SemaphoreKind, ShaderModule, ShaderStageFlags, SignalSemaphore,
+    SpecializationConstants, WaitSemaphore,
 };
 
 #[test]
@@ -458,7 +459,12 @@ fn test_compute_pipeline_full_dispatch() {
         rec.bind_compute_descriptor_sets(&pipeline_layout, 0, &[&dset]);
         rec.dispatch(N.div_ceil(64), 1, 1);
         // Compute -> Host barrier (compute_shader_bit -> host_bit, shader_write -> host_read)
-        rec.memory_barrier(0x800, 0x4000, 0x40, 0x2000);
+        rec.memory_barrier(
+            PipelineStage::COMPUTE_SHADER,
+            PipelineStage::HOST,
+            AccessFlags::SHADER_WRITE,
+            AccessFlags::HOST_READ,
+        );
         rec.end().unwrap();
     }
     let fence = Fence::new(&device).unwrap();
@@ -739,7 +745,12 @@ fn test_copy_buffer_staging_round_trip() {
             }],
         );
         // Transfer -> Host (transfer_bit -> host_bit, transfer_write -> host_read)
-        rec.memory_barrier(0x1000, 0x4000, 0x800, 0x2000);
+        rec.memory_barrier(
+            PipelineStage::TRANSFER,
+            PipelineStage::HOST,
+            AccessFlags::TRANSFER_READ,
+            AccessFlags::HOST_READ,
+        );
         rec.end().unwrap();
     }
 
@@ -863,7 +874,12 @@ fn test_dispatch_indirect_with_explicit_count() {
         rec.bind_compute_descriptor_sets(&pipeline_layout, 0, &[&dset]);
         rec.dispatch_indirect(&indirect, 0);
         // Compute -> Host
-        rec.memory_barrier(0x800, 0x4000, 0x40, 0x2000);
+        rec.memory_barrier(
+            PipelineStage::COMPUTE_SHADER,
+            PipelineStage::HOST,
+            AccessFlags::SHADER_WRITE,
+            AccessFlags::HOST_READ,
+        );
         rec.end().unwrap();
     }
     let fence = Fence::new(&device).unwrap();
@@ -968,15 +984,18 @@ fn test_query_pool_records_timestamp_around_dispatch() {
         let mut rec = cmd.begin().unwrap();
         // Reset is required before any timestamp can be written.
         rec.reset_query_pool(&qpool, 0, 2);
-        // VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT = 0x00000001
-        rec.write_timestamp(0x1, &qpool, 0);
+        rec.write_timestamp(PipelineStage::TOP_OF_PIPE, &qpool, 0);
         rec.bind_compute_pipeline(&pipe);
         rec.bind_compute_descriptor_sets(&pl, 0, &[&dset]);
         rec.dispatch(N.div_ceil(64), 1, 1);
-        // VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT = 0x00002000
-        rec.write_timestamp(0x2000, &qpool, 1);
+        rec.write_timestamp(PipelineStage::BOTTOM_OF_PIPE, &qpool, 1);
         // Compute -> Host
-        rec.memory_barrier(0x800, 0x4000, 0x40, 0x2000);
+        rec.memory_barrier(
+            PipelineStage::COMPUTE_SHADER,
+            PipelineStage::HOST,
+            AccessFlags::SHADER_WRITE,
+            AccessFlags::HOST_READ,
+        );
         rec.end().unwrap();
     }
     let fence = Fence::new(&device).unwrap();
@@ -1417,28 +1436,20 @@ fn test_image_buffer_round_trip_via_layout_transitions() {
         m.as_slice_mut().fill(0);
     }
 
-    // Pipeline-stage and access constants we need.
-    const TOP_OF_PIPE: u32 = 0x1;
-    const TRANSFER: u32 = 0x1000;
-    const HOST: u32 = 0x4000;
-    const ACCESS_TRANSFER_READ: u32 = 0x800;
-    const ACCESS_TRANSFER_WRITE: u32 = 0x1000;
-    const ACCESS_HOST_READ: u32 = 0x2000;
-
     let pool = CommandPool::new(&device, queue_family).unwrap();
     let mut cmd = pool.allocate_primary().unwrap();
     {
         let mut rec = cmd.begin().unwrap();
         // 1) UNDEFINED -> TRANSFER_DST_OPTIMAL
         rec.image_barrier(
-            TOP_OF_PIPE,
-            TRANSFER,
+            PipelineStage::TOP_OF_PIPE,
+            PipelineStage::TRANSFER,
             ImageBarrier {
                 image: &image,
                 old_layout: ImageLayout::UNDEFINED,
                 new_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-                src_access: 0,
-                dst_access: ACCESS_TRANSFER_WRITE,
+                src_access: AccessFlags::NONE,
+                dst_access: AccessFlags::TRANSFER_WRITE,
             },
         );
         // 2) Copy buffer -> image
@@ -1450,14 +1461,14 @@ fn test_image_buffer_round_trip_via_layout_transitions() {
         );
         // 3) TRANSFER_DST -> TRANSFER_SRC_OPTIMAL
         rec.image_barrier(
-            TRANSFER,
-            TRANSFER,
+            PipelineStage::TRANSFER,
+            PipelineStage::TRANSFER,
             ImageBarrier {
                 image: &image,
                 old_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
                 new_layout: ImageLayout::TRANSFER_SRC_OPTIMAL,
-                src_access: ACCESS_TRANSFER_WRITE,
-                dst_access: ACCESS_TRANSFER_READ,
+                src_access: AccessFlags::TRANSFER_WRITE,
+                dst_access: AccessFlags::TRANSFER_READ,
             },
         );
         // 4) Copy image -> buffer
@@ -1468,7 +1479,12 @@ fn test_image_buffer_round_trip_via_layout_transitions() {
             &[BufferImageCopy::full_2d(W, H)],
         );
         // 5) Transfer -> Host barrier so the host read sees the bytes.
-        rec.memory_barrier(TRANSFER, HOST, ACCESS_TRANSFER_WRITE, ACCESS_HOST_READ);
+        rec.memory_barrier(
+            PipelineStage::TRANSFER,
+            PipelineStage::HOST,
+            AccessFlags::TRANSFER_WRITE,
+            AccessFlags::HOST_READ,
+        );
         rec.end().unwrap();
     }
 
@@ -1668,14 +1684,13 @@ fn test_timeline_semaphore_chained_dispatches() {
         .unwrap();
 
     // Pass B: waits on timeline >= 1, signals -> 2.
-    // VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT = 0x1
     queue
         .submit_with_sync(
             &[&cmd_b],
             &[WaitSemaphore {
                 semaphore: &sem,
                 value: 1,
-                dst_stage_mask: 0x1,
+                dst_stage_mask: PipelineStage::TOP_OF_PIPE,
                 device_index: 0,
             }],
             &[SignalSemaphore {
@@ -1763,11 +1778,12 @@ fn test_sync2_memory_barrier_when_supported() {
     let mut cmd = pool.allocate_primary().unwrap();
     let supported = {
         let mut rec = cmd.begin().unwrap();
-        // VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT       = 0x800
-        // VK_PIPELINE_STAGE_2_HOST_BIT                 = 0x4000
-        // VK_ACCESS_2_SHADER_WRITE_BIT                 = 0x40
-        // VK_ACCESS_2_HOST_READ_BIT                    = 0x2000
-        let s2 = rec.memory_barrier2(0x800, 0x4000, 0x40, 0x2000);
+        let s2 = rec.memory_barrier2(
+            PipelineStage2::COMPUTE_SHADER,
+            PipelineStage2::HOST,
+            AccessFlags2::SHADER_WRITE,
+            AccessFlags2::HOST_READ,
+        );
         rec.end().unwrap();
         s2
     };
@@ -2357,11 +2373,12 @@ fn test_device_features_synchronization2_round_trip() {
     let mut cmd = pool.allocate_primary().unwrap();
     let supported = {
         let mut rec = cmd.begin().unwrap();
-        // VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT  = 0x800
-        // VK_PIPELINE_STAGE_2_HOST_BIT            = 0x4000
-        // VK_ACCESS_2_SHADER_WRITE_BIT            = 0x40
-        // VK_ACCESS_2_HOST_READ_BIT               = 0x2000
-        let res = rec.memory_barrier2(0x800, 0x4000, 0x40, 0x2000);
+        let res = rec.memory_barrier2(
+            PipelineStage2::COMPUTE_SHADER,
+            PipelineStage2::HOST,
+            AccessFlags2::SHADER_WRITE,
+            AccessFlags2::HOST_READ,
+        );
         rec.end().unwrap();
         res
     };

@@ -22,12 +22,12 @@
 //!   cargo run -p vulkane --features naga,fetch-spec --example compile_shader
 
 use vulkane::safe::{
-    ApiVersion, Buffer, BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool,
+    AccessFlags, ApiVersion, Buffer, BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool,
     ComputePipeline, DescriptorPool, DescriptorPoolSize, DescriptorSetLayout,
     DescriptorSetLayoutBinding, DescriptorType, DeviceCreateInfo, DeviceMemory, Fence, Format,
     Image, Image2dCreateInfo, ImageBarrier, ImageLayout, ImageUsage, ImageView, Instance,
-    InstanceCreateInfo, MemoryPropertyFlags, PipelineLayout, QueueCreateInfo, QueueFlags,
-    ShaderModule, ShaderStageFlags,
+    InstanceCreateInfo, MemoryPropertyFlags, PipelineLayout, PipelineStage, QueueCreateInfo,
+    QueueFlags, ShaderModule, ShaderStageFlags,
 };
 
 const W: u32 = 64;
@@ -35,16 +35,6 @@ const H: u32 = 64;
 const PIXEL_BYTES: u64 = 4;
 const BUF_SIZE: u64 = (W as u64) * (H as u64) * PIXEL_BYTES;
 
-// Pipeline-stage and access mask constants we use for layout transitions.
-const TOP_OF_PIPE: u32 = 0x1;
-const TRANSFER: u32 = 0x1000;
-const COMPUTE_SHADER: u32 = 0x800;
-const HOST: u32 = 0x4000;
-const ACCESS_TRANSFER_READ: u32 = 0x800;
-const ACCESS_TRANSFER_WRITE: u32 = 0x1000;
-const ACCESS_SHADER_READ: u32 = 0x20;
-const ACCESS_SHADER_WRITE: u32 = 0x40;
-const ACCESS_HOST_READ: u32 = 0x2000;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Load the pre-compiled SPIR-V shader.
@@ -84,10 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let queue_family_index = physical.find_queue_family(QueueFlags::COMPUTE).unwrap();
     let device = physical.create_device(DeviceCreateInfo {
-        queue_create_infos: &[QueueCreateInfo {
-            queue_family_index,
-            queue_priorities: vec![1.0],
-        }],
+        queue_create_infos: &[QueueCreateInfo::single(queue_family_index)],
         ..Default::default()
     })?;
     let queue = device.get_queue(queue_family_index, 0);
@@ -181,14 +168,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // UNDEFINED -> TRANSFER_DST_OPTIMAL
         rec.image_barrier(
-            TOP_OF_PIPE,
-            TRANSFER,
+            PipelineStage::TOP_OF_PIPE,
+            PipelineStage::TRANSFER,
             ImageBarrier {
                 image: &image,
                 old_layout: ImageLayout::UNDEFINED,
                 new_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-                src_access: 0,
-                dst_access: ACCESS_TRANSFER_WRITE,
+                src_access: AccessFlags::NONE,
+                dst_access: AccessFlags::TRANSFER_WRITE,
             },
         );
         // Upload pixels.
@@ -200,14 +187,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         // TRANSFER_DST -> GENERAL (storage layout)
         rec.image_barrier(
-            TRANSFER,
-            COMPUTE_SHADER,
+            PipelineStage::TRANSFER,
+            PipelineStage::COMPUTE_SHADER,
             ImageBarrier {
                 image: &image,
                 old_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
                 new_layout: ImageLayout::GENERAL,
-                src_access: ACCESS_TRANSFER_WRITE,
-                dst_access: ACCESS_SHADER_READ | ACCESS_SHADER_WRITE,
+                src_access: AccessFlags::TRANSFER_WRITE,
+                dst_access: AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE,
             },
         );
 
@@ -218,14 +205,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // GENERAL -> TRANSFER_SRC for readback.
         rec.image_barrier(
-            COMPUTE_SHADER,
-            TRANSFER,
+            PipelineStage::COMPUTE_SHADER,
+            PipelineStage::TRANSFER,
             ImageBarrier {
                 image: &image,
                 old_layout: ImageLayout::GENERAL,
                 new_layout: ImageLayout::TRANSFER_SRC_OPTIMAL,
-                src_access: ACCESS_SHADER_WRITE,
-                dst_access: ACCESS_TRANSFER_READ,
+                src_access: AccessFlags::SHADER_WRITE,
+                dst_access: AccessFlags::TRANSFER_READ,
             },
         );
         // Copy back to staging.
@@ -236,7 +223,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[BufferImageCopy::full_2d(W, H)],
         );
         // Transfer -> Host barrier so the host map sees the bytes.
-        rec.memory_barrier(TRANSFER, HOST, ACCESS_TRANSFER_WRITE, ACCESS_HOST_READ);
+        rec.memory_barrier(PipelineStage::TRANSFER, PipelineStage::HOST, AccessFlags::TRANSFER_WRITE, AccessFlags::HOST_READ);
 
         rec.end()?;
     }

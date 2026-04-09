@@ -184,6 +184,33 @@ impl RenderPass {
         })
     }
 
+    /// Convenience: create a single-subpass render pass with one color
+    /// attachment and no depth, starting from `UNDEFINED`.
+    ///
+    /// This covers the overwhelmingly common case for offscreen
+    /// rendering, post-processing, and simple examples.
+    pub fn simple_color(
+        device: &Device,
+        format: super::Format,
+        load_op: AttachmentLoadOp,
+        store_op: AttachmentStoreOp,
+        final_layout: super::ImageLayout,
+    ) -> Result<Self> {
+        Self::new(
+            device,
+            RenderPassCreateInfo {
+                color_attachments: &[AttachmentDescription {
+                    format,
+                    load_op,
+                    store_op,
+                    initial_layout: super::ImageLayout::UNDEFINED,
+                    final_layout,
+                }],
+                depth_attachment: None,
+            },
+        )
+    }
+
     /// Returns the raw `VkRenderPass` handle.
     pub fn raw(&self) -> VkRenderPass {
         self.handle

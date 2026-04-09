@@ -493,6 +493,18 @@ impl Instance {
         self.inner.handle
     }
 
+    /// Returns a reference to the instance-level Vulkan dispatch table.
+    ///
+    /// Use this to call raw Vulkan functions that the safe wrapper
+    /// doesn't cover yet. Each field is an `Option<fn_ptr>` — `None`
+    /// if the driver doesn't expose it, `Some` if callable.
+    ///
+    /// Combine with [`.raw()`](Self::raw) to get the raw `VkInstance`
+    /// handle for the first argument.
+    pub fn dispatch(&self) -> &VkInstanceDispatchTable {
+        &self.inner.dispatch
+    }
+
     /// Enumerate the physical device groups visible to this instance.
     ///
     /// Each group is a set of one or more physical devices that share

@@ -2,6 +2,7 @@
 
 use super::descriptor::{DescriptorSet, ShaderStageFlags};
 use super::device::DeviceInner;
+use super::flags::{AccessFlags, AccessFlags2, PipelineStage, PipelineStage2};
 use super::graphics_pipeline::GraphicsPipeline;
 use super::image::{BufferImageCopy, Image, ImageBarrier};
 use super::pipeline::{ComputePipeline, PipelineLayout};
@@ -366,10 +367,10 @@ impl<'a> CommandBufferRecording<'a> {
     /// Record `vkCmdWriteTimestamp`: write the current pipeline-stage
     /// timestamp into the given query slot.
     ///
-    /// `pipeline_stage` should be a single `VK_PIPELINE_STAGE_*` bit (e.g.
-    /// `0x00000001` = TOP_OF_PIPE, `0x00002000` = BOTTOM_OF_PIPE,
-    /// `0x00000800` = COMPUTE_SHADER).
-    pub fn write_timestamp(&mut self, pipeline_stage: u32, pool: &QueryPool, query: u32) {
+    /// `pipeline_stage` should be a single [`PipelineStage`] bit (e.g.
+    /// `PipelineStage::TOP_OF_PIPE`, `PipelineStage::BOTTOM_OF_PIPE`,
+    /// `PipelineStage::COMPUTE_SHADER`).
+    pub fn write_timestamp(&mut self, pipeline_stage: PipelineStage, pool: &QueryPool, query: u32) {
         let cmd = self
             .buffer
             .device
@@ -378,7 +379,7 @@ impl<'a> CommandBufferRecording<'a> {
             .expect("vkCmdWriteTimestamp is required by Vulkan 1.0");
         // Safety: command buffer is in recording state, pool is valid,
         // query slot must be in bounds (caller's responsibility).
-        unsafe { cmd(self.buffer.handle, pipeline_stage, pool.handle, query) };
+        unsafe { cmd(self.buffer.handle, pipeline_stage.0, pool.handle, query) };
     }
 
     /// Record an image memory barrier (one-image, color-aspect, single-mip,
@@ -386,11 +387,12 @@ impl<'a> CommandBufferRecording<'a> {
     /// images use for layout transitions like
     /// `UNDEFINED -> GENERAL` (before writing) or
     /// `GENERAL -> TRANSFER_SRC_OPTIMAL` (before reading back).
-    ///
-    /// `src_stage` and `dst_stage` are `VK_PIPELINE_STAGE_*` bit masks; the
-    /// `src_access` and `dst_access` fields on [`ImageBarrier`] are
-    /// `VK_ACCESS_*` bit masks.
-    pub fn image_barrier(&mut self, src_stage: u32, dst_stage: u32, barrier: ImageBarrier<'_>) {
+    pub fn image_barrier(
+        &mut self,
+        src_stage: PipelineStage,
+        dst_stage: PipelineStage,
+        barrier: ImageBarrier<'_>,
+    ) {
         let cmd = self
             .buffer
             .device
@@ -400,8 +402,8 @@ impl<'a> CommandBufferRecording<'a> {
 
         let raw = VkImageMemoryBarrier {
             sType: VkStructureType::STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            srcAccessMask: barrier.src_access,
-            dstAccessMask: barrier.dst_access,
+            srcAccessMask: barrier.src_access.0,
+            dstAccessMask: barrier.dst_access.0,
             oldLayout: barrier.old_layout.0,
             newLayout: barrier.new_layout.0,
             srcQueueFamilyIndex: !0u32, // VK_QUEUE_FAMILY_IGNORED
@@ -421,8 +423,8 @@ impl<'a> CommandBufferRecording<'a> {
         unsafe {
             cmd(
                 self.buffer.handle,
-                src_stage,
-                dst_stage,
+                src_stage.0,
+                dst_stage.0,
                 0,
                 0,
                 std::ptr::null(),
@@ -481,10 +483,10 @@ impl<'a> CommandBufferRecording<'a> {
     /// does not expose `vkCmdPipelineBarrier2`.
     pub fn memory_barrier2(
         &mut self,
-        src_stage: u64,
-        dst_stage: u64,
-        src_access: u64,
-        dst_access: u64,
+        src_stage: PipelineStage2,
+        dst_stage: PipelineStage2,
+        src_access: AccessFlags2,
+        dst_access: AccessFlags2,
     ) -> Result<()> {
         let cmd = self
             .buffer
@@ -495,10 +497,10 @@ impl<'a> CommandBufferRecording<'a> {
 
         let mb = VkMemoryBarrier2 {
             sType: VkStructureType::STRUCTURE_TYPE_MEMORY_BARRIER_2,
-            srcStageMask: src_stage,
-            srcAccessMask: src_access,
-            dstStageMask: dst_stage,
-            dstAccessMask: dst_access,
+            srcStageMask: src_stage.0,
+            srcAccessMask: src_access.0,
+            dstStageMask: dst_stage.0,
+            dstAccessMask: dst_access.0,
             ..Default::default()
         };
         let info = VkDependencyInfo {
@@ -519,8 +521,8 @@ impl<'a> CommandBufferRecording<'a> {
     /// for general notes.
     pub fn image_barrier2(
         &mut self,
-        src_stage: u64,
-        dst_stage: u64,
+        src_stage: PipelineStage2,
+        dst_stage: PipelineStage2,
         barrier: ImageBarrier<'_>,
     ) -> Result<()> {
         let cmd = self
@@ -532,10 +534,10 @@ impl<'a> CommandBufferRecording<'a> {
 
         let ib = VkImageMemoryBarrier2 {
             sType: VkStructureType::STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            srcStageMask: src_stage,
-            srcAccessMask: barrier.src_access as u64,
-            dstStageMask: dst_stage,
-            dstAccessMask: barrier.dst_access as u64,
+            srcStageMask: src_stage.0,
+            srcAccessMask: barrier.src_access.0 as u64,
+            dstStageMask: dst_stage.0,
+            dstAccessMask: barrier.dst_access.0 as u64,
             oldLayout: barrier.old_layout.0,
             newLayout: barrier.new_layout.0,
             srcQueueFamilyIndex: !0u32,
@@ -603,10 +605,10 @@ impl<'a> CommandBufferRecording<'a> {
     /// visible to subsequent host reads (or to subsequent shader work).
     pub fn memory_barrier(
         &mut self,
-        src_stage: u32,
-        dst_stage: u32,
-        src_access: u32,
-        dst_access: u32,
+        src_stage: PipelineStage,
+        dst_stage: PipelineStage,
+        src_access: AccessFlags,
+        dst_access: AccessFlags,
     ) {
         let cmd = self
             .buffer
@@ -617,8 +619,8 @@ impl<'a> CommandBufferRecording<'a> {
 
         let barrier = VkMemoryBarrier {
             sType: VkStructureType::STRUCTURE_TYPE_MEMORY_BARRIER,
-            srcAccessMask: src_access,
-            dstAccessMask: dst_access,
+            srcAccessMask: src_access.0,
+            dstAccessMask: dst_access.0,
             ..Default::default()
         };
 
@@ -626,8 +628,8 @@ impl<'a> CommandBufferRecording<'a> {
         unsafe {
             cmd(
                 self.buffer.handle,
-                src_stage,
-                dst_stage,
+                src_stage.0,
+                dst_stage.0,
                 0,
                 1,
                 &barrier,

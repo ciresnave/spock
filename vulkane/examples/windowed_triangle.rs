@@ -33,9 +33,9 @@ use vulkane::safe::{
     GraphicsPipeline, GraphicsPipelineBuilder, GraphicsShaderStage, ImageLayout, ImageUsage,
     ImageView, Instance, InstanceCreateInfo, KHR_SURFACE_EXTENSION, KHR_SWAPCHAIN_EXTENSION,
     KHR_WAYLAND_SURFACE_EXTENSION, KHR_WIN32_SURFACE_EXTENSION, KHR_XCB_SURFACE_EXTENSION,
-    KHR_XLIB_SURFACE_EXTENSION, PipelineLayout, PresentMode, QueueCreateInfo, QueueFlags,
-    RenderPass, RenderPassCreateInfo, Semaphore, ShaderModule, SignalSemaphore, Surface, Swapchain,
-    SwapchainCreateInfo, WaitSemaphore,
+    KHR_XLIB_SURFACE_EXTENSION, PipelineLayout, PipelineStage, PresentMode, QueueCreateInfo,
+    QueueFlags, RenderPass, RenderPassCreateInfo, Semaphore, ShaderModule, SignalSemaphore,
+    Surface, Swapchain, SwapchainCreateInfo, WaitSemaphore,
 };
 
 const TITLE: &str = "vulkane — windowed triangle";
@@ -112,10 +112,7 @@ impl Renderer {
         // 5. Create the device with KHR_swapchain enabled.
         let device_extensions = [KHR_SWAPCHAIN_EXTENSION];
         let device = physical.create_device(DeviceCreateInfo {
-            queue_create_infos: &[QueueCreateInfo {
-                queue_family_index: queue_family,
-                queue_priorities: vec![1.0],
-            }],
+            queue_create_infos: &[QueueCreateInfo::single(queue_family)],
             enabled_extensions: &device_extensions,
             ..Default::default()
         })?;
@@ -253,21 +250,11 @@ impl Renderer {
                 }
             };
 
-        // VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT = 0x400
         let cmd = &self.cmd_buffers[image_index as usize];
         self.queue.submit_with_sync(
             &[cmd],
-            &[WaitSemaphore {
-                semaphore: &frame.image_available,
-                value: 0,
-                dst_stage_mask: 0x400,
-                device_index: 0,
-            }],
-            &[SignalSemaphore {
-                semaphore: &frame.render_finished,
-                value: 0,
-                device_index: 0,
-            }],
+            &[WaitSemaphore::binary(&frame.image_available, PipelineStage::COLOR_ATTACHMENT_OUTPUT)],
+            &[SignalSemaphore::binary(&frame.render_finished)],
             Some(&frame.in_flight),
         )?;
 
