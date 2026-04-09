@@ -21,29 +21,38 @@ fn main() {
 
 #[cfg(feature = "naga")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use spock::safe::naga::compile_glsl;
+    use spock::safe::naga::{compile_glsl, compile_wgsl};
+
+    enum SourceKind {
+        Glsl(::naga::ShaderStage),
+        Wgsl,
+    }
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let shaders_dir = format!("{manifest_dir}/examples/shaders");
 
-    // Compile every supported GLSL file in the shaders directory.
+    // Compile every supported shader file in the shaders directory.
     let mut found = 0usize;
     for entry in std::fs::read_dir(&shaders_dir)? {
         let entry = entry?;
         let path = entry.path();
-        let stage = match path.extension().and_then(|s| s.to_str()) {
-            Some("comp") => ::naga::ShaderStage::Compute,
-            Some("vert") => ::naga::ShaderStage::Vertex,
-            Some("frag") => ::naga::ShaderStage::Fragment,
+        let kind = match path.extension().and_then(|s| s.to_str()) {
+            Some("comp") => SourceKind::Glsl(::naga::ShaderStage::Compute),
+            Some("vert") => SourceKind::Glsl(::naga::ShaderStage::Vertex),
+            Some("frag") => SourceKind::Glsl(::naga::ShaderStage::Fragment),
+            // WGSL modules carry every entry point in one file. The
+            // resulting .spv has all of them; the consumer picks which
+            // entry to run via the pipeline stage's `pName`.
+            Some("wgsl") => SourceKind::Wgsl,
             _ => continue,
         };
         found += 1;
-        let glsl_path = path.display().to_string();
+        let src_path = path.display().to_string();
         // For .comp shaders we keep the legacy `.spv` suffix (the
         // existing compute examples already reference those names).
         // For .vert / .frag we suffix as `.vert.spv` / `.frag.spv` so
         // a single `triangle.vert` and `triangle.frag` pair don't
-        // collide on `triangle.spv`.
+        // collide on `triangle.spv`. WGSL gets `.wgsl.spv`.
         let stem = path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -56,11 +65,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let spv_path = path.with_file_name(&spv_filename).display().to_string();
 
-        println!("Reading {glsl_path}");
+        println!("Reading {src_path}");
         let source = std::fs::read_to_string(&path)?;
 
-        println!("Compiling GLSL -> SPIR-V via naga ({stage:?})");
-        let words = compile_glsl(&source, stage)?;
+        let words = match kind {
+            SourceKind::Glsl(stage) => {
+                println!("Compiling GLSL -> SPIR-V via naga ({stage:?})");
+                compile_glsl(&source, stage)?
+            }
+            SourceKind::Wgsl => {
+                println!("Compiling WGSL -> SPIR-V via naga");
+                compile_wgsl(&source)?
+            }
+        };
 
         // Write as little-endian bytes (the universal SPIR-V on-disk format).
         let mut bytes = Vec::with_capacity(words.len() * 4);
@@ -77,7 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if found == 0 {
-        eprintln!("No GLSL shader files found under {shaders_dir}");
+        eprintln!("No shader sources found under {shaders_dir}");
     } else {
         println!("Done. Compiled {found} shader(s).");
     }

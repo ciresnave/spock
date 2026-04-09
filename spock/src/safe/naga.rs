@@ -18,7 +18,7 @@
 
 use super::Error;
 use naga::back::spv;
-use naga::front::glsl;
+use naga::front::{glsl, wgsl};
 use naga::valid::{Capabilities, ValidationFlags, Validator};
 use naga::{Module, ShaderStage};
 
@@ -84,6 +84,47 @@ pub fn compile_glsl(source: &str, stage: ShaderStage) -> Result<Vec<u32>, NagaEr
         .parse(&glsl::Options::from(stage), source)
         .map_err(|errors| NagaError::Parse(format!("{errors:?}")))?;
 
+    spirv_from_module(module)
+}
+
+/// Compile a WGSL source string to a SPIR-V word vector.
+///
+/// WGSL (WebGPU Shading Language) is the canonical input format for
+/// [`naga`]. Unlike the GLSL frontend, the WGSL frontend handles
+/// combined image samplers (`texture_2d<f32>` + `sampler`) cleanly,
+/// which makes it the right choice for textured rendering examples.
+///
+/// All entry points in the WGSL module are translated to a single
+/// multi-entry-point SPIR-V module. The caller selects which entry
+/// point each `VkPipelineShaderStageCreateInfo` runs by passing the
+/// matching `pName` (e.g. `"vs_main"` for the vertex stage and
+/// `"fs_main"` for the fragment stage).
+///
+/// # Example
+///
+/// ```ignore
+/// use spock::safe::naga::compile_wgsl;
+///
+/// let wgsl = r#"
+///     @group(0) @binding(0) var tex: texture_2d<f32>;
+///     @group(0) @binding(1) var samp: sampler;
+///
+///     @fragment
+///     fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+///         return textureSample(tex, samp, uv);
+///     }
+/// "#;
+///
+/// let spirv = compile_wgsl(wgsl)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn compile_wgsl(source: &str) -> Result<Vec<u32>, NagaError> {
+    let module =
+        wgsl::parse_str(source).map_err(|e| NagaError::Parse(e.emit_to_string(source)))?;
+    spirv_from_module(module)
+}
+
+fn spirv_from_module(module: Module) -> Result<Vec<u32>, NagaError> {
     // Validate the IR
     let info = Validator::new(ValidationFlags::all(), Capabilities::all())
         .validate(&module)

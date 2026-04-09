@@ -324,6 +324,73 @@ impl DescriptorSet {
         unsafe { update(self.device.handle, 1, &write, 0, std::ptr::null()) };
     }
 
+    /// Update one binding in this set to point at an image view used as
+    /// a `SAMPLED_IMAGE` descriptor (i.e. a texture without an attached
+    /// sampler — pair it with a separate `SAMPLER` binding from
+    /// [`write_sampler`](Self::write_sampler)). This is the binding
+    /// shape produced by WGSL's `texture_2d` declarations.
+    ///
+    /// `image_layout` is the layout the shader will see when it
+    /// samples the image; typically
+    /// [`ImageLayout::SHADER_READ_ONLY_OPTIMAL`](super::ImageLayout::SHADER_READ_ONLY_OPTIMAL).
+    pub fn write_sampled_image(&self, binding: u32, view: &ImageView, image_layout: ImageLayout) {
+        let update = self
+            .device
+            .dispatch
+            .vkUpdateDescriptorSets
+            .expect("vkUpdateDescriptorSets is required by Vulkan 1.0");
+
+        let info = VkDescriptorImageInfo {
+            sampler: 0,
+            imageView: view.handle,
+            imageLayout: image_layout.0,
+        };
+
+        let write = VkWriteDescriptorSet {
+            sType: VkStructureType::STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            dstSet: self.handle,
+            dstBinding: binding,
+            descriptorCount: 1,
+            descriptorType: VkDescriptorType::DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            pImageInfo: &info,
+            ..Default::default()
+        };
+
+        // Safety: handle is valid; write/info live for the duration of the call.
+        unsafe { update(self.device.handle, 1, &write, 0, std::ptr::null()) };
+    }
+
+    /// Update one binding in this set to point at a standalone
+    /// [`Sampler`] (`SAMPLER` descriptor type). Pair with
+    /// [`write_sampled_image`](Self::write_sampled_image) when using a
+    /// WGSL-style separated texture/sampler binding.
+    pub fn write_sampler(&self, binding: u32, sampler: &Sampler) {
+        let update = self
+            .device
+            .dispatch
+            .vkUpdateDescriptorSets
+            .expect("vkUpdateDescriptorSets is required by Vulkan 1.0");
+
+        let info = VkDescriptorImageInfo {
+            sampler: sampler.handle,
+            imageView: 0,
+            imageLayout: VkImageLayout::IMAGE_LAYOUT_UNDEFINED,
+        };
+
+        let write = VkWriteDescriptorSet {
+            sType: VkStructureType::STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            dstSet: self.handle,
+            dstBinding: binding,
+            descriptorCount: 1,
+            descriptorType: VkDescriptorType::DESCRIPTOR_TYPE_SAMPLER,
+            pImageInfo: &info,
+            ..Default::default()
+        };
+
+        // Safety: handle is valid; write/info live for the duration of the call.
+        unsafe { update(self.device.handle, 1, &write, 0, std::ptr::null()) };
+    }
+
     /// Update one binding in this set to point at an image view (currently
     /// only `STORAGE_IMAGE` is supported by the safe wrapper).
     ///
