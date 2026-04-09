@@ -1,7 +1,7 @@
-# Spock - Copilot Instructions
+# Vulkane - Copilot Instructions
 
 ## Project Overview
-Spock is a high-performance Rust Vulkan API binding designed to be THE premier Vulkan API solution. Focus on exceptional performance, comprehensive security, cross-platform compatibility, and multi-language SDK support.
+Vulkane is a high-performance Rust Vulkan API binding designed to be THE premier Vulkan API solution. Focus on exceptional performance, comprehensive security, cross-platform compatibility, and multi-language SDK support.
 
 ## Core Principles
 

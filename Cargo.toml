@@ -1,6 +1,6 @@
 [workspace]
   members = [
-    "spock",
+    "vulkane",
     "vulkan_gen",
   ]
   resolver = "2"

@@ -1,0 +1,33 @@
+// 2D storage-image compute shader: invert each pixel of an RGBA8 image.
+//
+// Reads each pixel via imageLoad, replaces it with (255 - R, 255 - G,
+// 255 - B, A) via imageStore, then exits. Used by the
+// `compute_image_invert` example to demonstrate the safe wrapper's
+// 2D-storage-image path.
+//
+// Compile with:
+//   glslc -O invert_image.comp -o invert_image.spv
+//
+// Or, with the vulkane crate's `naga` feature:
+//   cargo run -p vulkane --features naga,fetch-spec --example compile_shader
+
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// rgba8 storage image at descriptor set 0, binding 0.
+// Naga's GLSL frontend doesn't currently accept the format-qualifier-only
+// `layout(rgba8) uniform image2D` syntax for the SPIR-V output we need;
+// we use the explicit `restrict` + format qualifier so the resulting
+// SPIR-V matches what `STORAGE_IMAGE` expects with format `R8G8B8A8_UNORM`.
+layout(set = 0, binding = 0, rgba8) uniform restrict image2D img;
+
+void main() {
+    ivec2 size = imageSize(img);
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= size.x || coord.y >= size.y) {
+        return;
+    }
+    vec4 color = imageLoad(img, coord);
+    imageStore(img, coord, vec4(1.0 - color.rgb, color.a));
+}

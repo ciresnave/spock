@@ -1,7 +1,7 @@
 # vulkan_gen
 
 Vulkan XML specification parser and Rust binding generator. Used internally
-by the [`spock`](https://crates.io/crates/spock) crate, but reusable as a
+by the [`vulkane`](https://crates.io/crates/vulkane) crate, but reusable as a
 standalone code generator.
 
 `vulkan_gen` parses [`vk.xml`](https://github.com/KhronosGroup/Vulkan-Docs/blob/main/xml/vk.xml)
@@ -12,7 +12,7 @@ DOM parsing to correctly handle nested elements like `<member>` and
 `<param>` that contain mixed text and child element content.
 
 For end users targeting Vulkan from Rust, **install the
-[`spock`](https://crates.io/crates/spock) crate instead** — it includes
+[`vulkane`](https://crates.io/crates/vulkane) crate instead** — it includes
 `vulkan_gen` as a build dependency and exposes both the raw bindings and
 a complete safe RAII wrapper for compute and graphics.
 

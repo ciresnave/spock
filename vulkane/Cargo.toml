@@ -1,0 +1,48 @@
+[package]
+name = "vulkane"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Eric Evans <CireSnave@gmail.com>"]
+license = "MIT OR Apache-2.0"
+description = "Vulkan API bindings generated entirely from vk.xml, with a complete safe RAII wrapper covering compute and graphics: instance/device/queue, buffer, image, sampler, render pass, framebuffer, graphics + compute pipelines, swapchain, a VMA-style sub-allocator with TLSF + linear pools and defragmentation, sync primitives (fences, binary + timeline semaphores, sync2 barriers), query pools, and an optional naga GLSL/WGSL→SPIR-V feature. Supports Vulkan 1.2.175 onward — swap vk.xml and rebuild."
+keywords = ["vulkan", "graphics", "gpu", "rendering", "ffi"]
+categories = ["graphics", "api-bindings", "rendering", "external-ffi-bindings"]
+readme = "README.md"
+repository = "https://github.com/ciresnave/spock"
+homepage = "https://github.com/ciresnave/spock"
+documentation = "https://docs.rs/vulkane"
+
+[features]
+default = ["build-support"]
+# Build support for XML parsing and code generation during build
+build-support = []
+# Enable automatic download of vk.xml from the Khronos GitHub repository
+# when no local copy is found. Requires network access during build.
+fetch-spec = []
+# Enable runtime GLSL/WGSL -> SPIR-V compilation via the `naga` crate.
+# Adds the `vulkane::safe::naga::compile_glsl` and `compile_wgsl` functions.
+naga = ["dep:naga"]
+
+[dependencies]
+# Dynamic loading of the Vulkan runtime library
+libloading = { workspace = true }
+# Optional: GLSL/WGSL -> SPIR-V compilation via Naga (the wgpu shader translator).
+# Pulls in glsl-in, wgsl-in and spv-out features only — no other backends.
+naga = { version = "29", optional = true, default-features = false, features = ["glsl-in", "wgsl-in", "spv-out"] }
+
+[build-dependencies]
+# Path is used for development; the version is what crates.io uses
+# when publishing — both are required by `cargo publish`.
+vulkan_gen = { path = "../vulkan_gen", version = "0.1" }
+ureq = "3"
+
+# Example-only dependencies. Not pulled into the vulkane crate's own
+# build — only when building the bundled examples that need them.
+[dev-dependencies]
+winit = "0.30"
+raw-window-handle = "0.6"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

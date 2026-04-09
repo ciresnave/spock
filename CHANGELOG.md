@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to spock will be documented in this file.
+All notable changes to vulkane will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial public release of spock — Vulkan API bindings generated entirely from the official `vk.xml` specification, plus a complete safe RAII wrapper covering compute and graphics end-to-end.
-- **Safe wrapper module** (`spock::safe`) — RAII wrappers covering the **complete compute path**: `Instance`, `PhysicalDevice`, `Device`, `Queue`, `Buffer`, `DeviceMemory` (with `MappedMemory`), `ShaderModule` (takes `&[u32]` SPIR-V), `DescriptorSetLayout`, `DescriptorPool`, `DescriptorSet`, `PipelineLayout`, `ComputePipeline`, `CommandPool`, `CommandBuffer`, and `Fence`. Every handle is destroyed automatically via `Drop`. No manual `vkDestroy*` calls.
-- **Optional `naga` feature** — pulls in `naga` 29 with `glsl-in` + `spv-out` only. Exposes `spock::safe::naga::compile_glsl(source, stage)` returning `Vec<u32>` SPIR-V. Disabled by default; users with their own SPIR-V pay nothing.
+- Initial public release of vulkane — Vulkan API bindings generated entirely from the official `vk.xml` specification, plus a complete safe RAII wrapper covering compute and graphics end-to-end.
+- **Safe wrapper module** (`vulkane::safe`) — RAII wrappers covering the **complete compute path**: `Instance`, `PhysicalDevice`, `Device`, `Queue`, `Buffer`, `DeviceMemory` (with `MappedMemory`), `ShaderModule` (takes `&[u32]` SPIR-V), `DescriptorSetLayout`, `DescriptorPool`, `DescriptorSet`, `PipelineLayout`, `ComputePipeline`, `CommandPool`, `CommandBuffer`, and `Fence`. Every handle is destroyed automatically via `Drop`. No manual `vkDestroy*` calls.
+- **Optional `naga` feature** — pulls in `naga` 29 with `glsl-in` + `spv-out` only. Exposes `vulkane::safe::naga::compile_glsl(source, stage)` returning `Vec<u32>` SPIR-V. Disabled by default; users with their own SPIR-V pay nothing.
 - **`fill_buffer` example** that exercises the safe wrapper end-to-end on a real GPU using `vkCmdFillBuffer`.
 - **`compute_square` example** — complete compute round trip: loads pre-compiled SPIR-V, creates a storage buffer of 256 `u32`s, builds descriptor set + pipeline layout + compute pipeline, dispatches, and verifies the GPU squared every element. Validated on real hardware (NVIDIA RTX 4070) and on Lavapipe in CI.
 - **`compile_shader` example** — one-shot helper (under the `naga` feature) that regenerates the pre-compiled `square_buffer.spv` from the GLSL source.
@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Binary and timeline semaphores** — `Semaphore::binary(device)` and `Semaphore::timeline(device, initial_value)`, with `current_value`, `signal_value`, and `wait_value` for the timeline case. `Queue::submit_with_sync(cmds, wait_semaphores, signal_semaphores, fence)` accepts mixed binary/timeline wait/signal lists; the safe wrapper builds the `VkTimelineSemaphoreSubmitInfo` chain automatically when timeline semaphores are present.
 - **Pipeline cache** — `PipelineCache::new` / `PipelineCache::with_data` to create an empty or pre-populated cache, `PipelineCache::data` to serialize for disk persistence, and `ComputePipeline::with_specialization_and_cache` to plug a cache into pipeline creation. Implementation-specific blob is opaque and silently ignored on driver mismatch, so it's safe to always pass any previously saved bytes.
 - **Synchronization2** — `CommandBufferRecording::memory_barrier2` and `image_barrier2` use `vkCmdPipelineBarrier2` with 64-bit `VkPipelineStageFlags2` / `VkAccessFlags2`. Returns `MissingFunction` when the device doesn't expose `vkCmdPipelineBarrier2` (Vulkan 1.0/1.1 without `VK_KHR_synchronization2`); the legacy `memory_barrier` and `image_barrier` continue to work everywhere.
-- **VMA-style sub-allocator** (`spock::safe::Allocator`) — pools many sub-allocations into a small number of `vkAllocateMemory` blocks so apps don't hit `maxMemoryAllocationCount` (~4096 on most drivers). Highlights:
+- **VMA-style sub-allocator** (`vulkane::safe::Allocator`) — pools many sub-allocations into a small number of `vkAllocateMemory` blocks so apps don't hit `maxMemoryAllocationCount` (~4096 on most drivers). Highlights:
   - **Two-Level Segregated Fit** (TLSF) free-list per block: O(1) allocation and free, low fragmentation, the same algorithm AMD's VMA uses.
   - **Memory-type selection** by `(required, preferred)` property flag pair, driven by the `AllocationUsage` hint (`Auto`, `DeviceLocal`, `HostVisible`, `HostVisibleDeviceLocal`).
   - **Dedicated allocations** when the user opts in (`AllocationCreateInfo::dedicated = true`) or when the request is larger than half the block size; falls through to a direct `vkAllocateMemory`.
@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Graphics path: render passes, framebuffers, graphics pipelines.** New `safe::render_pass` module with `RenderPass`, `Framebuffer`, `RenderPassCreateInfo`, `AttachmentDescription`, `AttachmentLoadOp`, `AttachmentStoreOp` for the most common single-subpass shape (N color attachments + optional depth). New `safe::graphics_pipeline` module with `GraphicsPipeline`, `GraphicsPipelineBuilder` (a focused builder over the nine sub-create-infos `vkCreateGraphicsPipelines` requires), `GraphicsShaderStage`, `VertexInputBinding`, `VertexInputAttribute`, `PrimitiveTopology`, `PolygonMode`, `CullMode`, `FrontFace`. Image gains `ImageUsage::COLOR_ATTACHMENT` / `DEPTH_STENCIL_ATTACHMENT` / `INPUT_ATTACHMENT` / `TRANSIENT_ATTACHMENT` flags and `ImageLayout::COLOR_ATTACHMENT_OPTIMAL` / `DEPTH_STENCIL_ATTACHMENT_OPTIMAL` / `PRESENT_SRC_KHR`. `Format` gains `B8G8R8A8_UNORM`, `B8G8R8A8_SRGB`, `R32G32_SFLOAT`, `R32G32B32_SFLOAT`, `D32_SFLOAT`, `D24_UNORM_S8_UINT`. New `Sampler` type with `SamplerCreateInfo`, `SamplerFilter`, `SamplerMipmapMode`, `SamplerAddressMode`. Command-buffer recording gains `begin_render_pass`, `end_render_pass`, `bind_graphics_pipeline`, `bind_graphics_descriptor_sets`, `bind_vertex_buffers`, `bind_index_buffer`, `draw`, `draw_indexed`, `set_viewport`, `set_scissor`.
 - **`headless_triangle` example** — renders a colored RGB triangle into a 256×256 R8G8B8A8 image via a real graphics pipeline, copies it back to a staging buffer, and verifies that the centre pixel is non-black and ~24% of the viewport is painted. No window or swapchain required; runs in CI on Lavapipe and locally on real hardware. The pre-compiled `triangle.vert.spv` / `triangle.frag.spv` are checked in alongside the GLSL sources. The `compile_shader` example now globs every `*.comp`, `*.vert`, `*.frag` under `examples/shaders/` and dispatches to the right naga stage automatically.
 - **Surface (`VK_KHR_surface`) and Swapchain (`VK_KHR_swapchain`)** — `safe::surface` module with `Surface`, `SurfaceCapabilities`, `SurfaceFormat`, `PresentMode`, plus three `unsafe` platform constructors: `Surface::from_win32`, `Surface::from_wayland`, `Surface::from_metal`. (Xlib/Xcb constructors are deferred until the bindings generator correctly types `Window`/`xcb_window_t` as integers.) `safe::swapchain` module with `Swapchain`, `SwapchainCreateInfo`, the standard `acquire_next_image` / `present` semaphore loop, `image_views()` for per-image framebuffer construction, and a `pick_surface_format()` helper. Constants for the canonical extension names (`KHR_SURFACE_EXTENSION`, `KHR_WIN32_SURFACE_EXTENSION`, `KHR_WAYLAND_SURFACE_EXTENSION`, `EXT_METAL_SURFACE_EXTENSION`, `KHR_SWAPCHAIN_EXTENSION`) are exported so users don't have to hand-type them.
-- **`windowed_triangle` example** — opens a real OS window via `winit` and renders the same RGB triangle as `headless_triangle` to a swapchain image, with the standard acquire / submit / present loop and per-frame `(image_available, render_finished, in_flight)` sync triple. `winit` and `raw-window-handle` are dev-dependencies — they're not pulled into the spock crate's own build. CI builds the example on every platform; users run it locally to see the window. Validated visually on real NVIDIA RTX 4070 (Win32 path).
+- **`windowed_triangle` example** — opens a real OS window via `winit` and renders the same RGB triangle as `headless_triangle` to a swapchain image, with the standard acquire / submit / present loop and per-frame `(image_available, render_finished, in_flight)` sync triple. `winit` and `raw-window-handle` are dev-dependencies — they're not pulled into the vulkane crate's own build. CI builds the example on every platform; users run it locally to see the window. Validated visually on real NVIDIA RTX 4070 (Win32 path).
 - **vk.xml `api` attribute filter** in the parser. Previously, function parameters and struct members tagged `api="vulkansc"` (Vulkan Safety Critical) were emitted alongside the desktop-Vulkan ones — `vkCreateSwapchainKHR` ended up with two `pCreateInfo` parameters in the generated bindings, which would have made every swapchain call silently misbehave on real drivers. The parser now filters to keep only `api="vulkan"` / `api="vulkanbase"` entries (and entries with no `api` attribute, which apply universally).
 - **Lavapipe integration in CI** — Linux runners install Mesa's software Vulkan implementation so the real-Vulkan integration tests actually exercise the loader on every CI run.
 - **Strict clippy on CI** — `cargo clippy --workspace -- -D warnings` is enforced.
@@ -79,8 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
-- Spock generates ~52,000 lines of Rust bindings covering ~1,478 structs, ~1,343 type aliases, ~148 Rust enums, ~3,064 constants, and ~657 function pointer typedefs from a typical recent vk.xml.
-- Nothing about Vulkan is hardcoded in spock's source code. To target a new Vulkan version, swap the vk.xml file (or set `VK_VERSION`) and rebuild.
+- Vulkane generates ~52,000 lines of Rust bindings covering ~1,478 structs, ~1,343 type aliases, ~148 Rust enums, ~3,064 constants, and ~657 function pointer typedefs from a typical recent vk.xml.
+- Nothing about Vulkan is hardcoded in vulkane's source code. To target a new Vulkan version, swap the vk.xml file (or set `VK_VERSION`) and rebuild.
 - All structs implement `Default`. To construct a `Vk*CreateInfo` ergonomically,
   set just the `sType` and required fields and use `..Default::default()` for
   the rest:
@@ -101,7 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The safe wrapper module covers the **complete compute path** but does not
   yet cover graphics-specific functionality: surfaces, swapchains, render
   passes, graphics pipelines, images for color attachments, or samplers.
-  Use `spock::raw` for those use cases.
+  Use `vulkane::raw` for those use cases.
 - The real-Vulkan integration tests run on Linux CI runners via Lavapipe
   (Mesa's software rasterizer). Windows and macOS CI runners don't have a
   Vulkan ICD by default, so the integration tests skip gracefully there.

@@ -101,7 +101,7 @@ pub fn parse_vk_xml(xml_content: &str) -> Result<VulkanSpecification, String> {
         // Top-level api-profile filter: any element tagged for a non-
         // desktop Vulkan profile is skipped entirely. This catches
         // <feature api="vulkansc"> blocks (which would otherwise
-        // contribute Vulkan SC core enum values to spock's enums) and
+        // contribute Vulkan SC core enum values to vulkane's enums) and
         // any other top-level element that gets tagged in future
         // vk.xml releases.
         if let Some(api) = attr(child, "api") {
@@ -631,7 +631,7 @@ fn parse_command(node: roxmltree::Node, spec: &mut VulkanSpecification) {
     {
         // Filter on `api` attribute: vk.xml sometimes lists the same
         // parameter twice for the desktop Vulkan profile vs Vulkan SC
-        // (Safety Critical). spock targets desktop Vulkan, so skip
+        // (Safety Critical). vulkane targets desktop Vulkan, so skip
         // entries explicitly tagged for a non-desktop profile. Entries
         // with no `api` attribute apply to all profiles and are kept.
         if let Some(api) = attr(param_node, "api") {

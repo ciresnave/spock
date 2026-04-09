@@ -52,13 +52,13 @@ jobs:
       # vk.xml is downloaded automatically via the fetch-spec feature on CI
       # so we don't need to vendor a copy of the spec.
       - name: Build (default features)
-        run: cargo build -p spock --features fetch-spec
+        run: cargo build -p vulkane --features fetch-spec
 
       - name: Build (no default features)
-        run: cargo build -p spock --features fetch-spec --no-default-features
+        run: cargo build -p vulkane --features fetch-spec --no-default-features
 
       - name: Build with naga feature
-        run: cargo build -p spock --features fetch-spec,naga
+        run: cargo build -p vulkane --features fetch-spec,naga
 
       - name: Run unit tests (no naga)
         # On Linux, Lavapipe is installed above so the real-Vulkan integration
@@ -74,22 +74,22 @@ jobs:
 
       - name: Build examples
         run: |
-          cargo build -p spock --features fetch-spec --example device_info
-          cargo build -p spock --features fetch-spec --example fill_buffer
-          cargo build -p spock --features fetch-spec --example compute_square
-          cargo build -p spock --features fetch-spec --example compute_image_invert
-          cargo build -p spock --features fetch-spec --example headless_triangle
-          cargo build -p spock --features fetch-spec --example windowed_triangle
-          cargo build -p spock --features fetch-spec,naga --example compile_shader
+          cargo build -p vulkane --features fetch-spec --example device_info
+          cargo build -p vulkane --features fetch-spec --example fill_buffer
+          cargo build -p vulkane --features fetch-spec --example compute_square
+          cargo build -p vulkane --features fetch-spec --example compute_image_invert
+          cargo build -p vulkane --features fetch-spec --example headless_triangle
+          cargo build -p vulkane --features fetch-spec --example windowed_triangle
+          cargo build -p vulkane --features fetch-spec,naga --example compile_shader
 
       - name: Run examples on Linux (with Lavapipe)
         if: runner.os == 'Linux'
         run: |
-          cargo run -p spock --features fetch-spec --example device_info
-          cargo run -p spock --features fetch-spec --example fill_buffer
-          cargo run -p spock --features fetch-spec --example compute_square
-          cargo run -p spock --features fetch-spec --example compute_image_invert
-          cargo run -p spock --features fetch-spec --example headless_triangle
+          cargo run -p vulkane --features fetch-spec --example device_info
+          cargo run -p vulkane --features fetch-spec --example fill_buffer
+          cargo run -p vulkane --features fetch-spec --example compute_square
+          cargo run -p vulkane --features fetch-spec --example compute_image_invert
+          cargo run -p vulkane --features fetch-spec --example headless_triangle
 
   docs:
     name: Build docs
