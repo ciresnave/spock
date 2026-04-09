@@ -141,8 +141,8 @@ pub use render_pass::{
 pub use shader::ShaderModule;
 pub use surface::{
     EXT_METAL_SURFACE_EXTENSION, KHR_SURFACE_EXTENSION, KHR_SWAPCHAIN_EXTENSION,
-    KHR_WAYLAND_SURFACE_EXTENSION, KHR_WIN32_SURFACE_EXTENSION, PresentMode, Surface,
-    SurfaceCapabilities, SurfaceFormat,
+    KHR_WAYLAND_SURFACE_EXTENSION, KHR_WIN32_SURFACE_EXTENSION, KHR_XCB_SURFACE_EXTENSION,
+    KHR_XLIB_SURFACE_EXTENSION, PresentMode, Surface, SurfaceCapabilities, SurfaceFormat,
 };
 pub use swapchain::{Swapchain, SwapchainCreateInfo};
 pub use sync::{Fence, Semaphore, SemaphoreKind};

@@ -17,7 +17,7 @@ pub mod bindings {
         clippy::all
     )]
 
-    use core::ffi::{c_char, c_void};
+    use core::ffi::{c_char, c_ulong, c_void};
 
     include!(concat!(env!("OUT_DIR"), "/vulkan_bindings.rs"));
 }

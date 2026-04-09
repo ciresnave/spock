@@ -6,13 +6,9 @@
 //!
 //! - [`Surface::from_win32`] — Win32 (Windows)
 //! - [`Surface::from_wayland`] — Wayland (Linux)
+//! - [`Surface::from_xlib`] — Xlib (Linux / *BSD)
+//! - [`Surface::from_xcb`] — Xcb (Linux / *BSD)
 //! - [`Surface::from_metal`] — Metal (macOS / iOS via MoltenVK)
-//!
-//! Xlib and Xcb are not yet exposed because the bindings generator
-//! treats `Window` / `xcb_window_t` as opaque pointers, which is wrong
-//! for those XID-based handles. They will be added once that binding
-//! issue is fixed; until then drop to [`spock::raw`](crate::raw) for
-//! Xlib/Xcb surfaces.
 //!
 //! The surface itself does very little — its purpose is to be the
 //! target of a [`Swapchain`](super::Swapchain), which is what actually
@@ -26,6 +22,8 @@
 //!
 //! - Win32: `VK_KHR_win32_surface`
 //! - Wayland: `VK_KHR_wayland_surface`
+//! - Xlib: `VK_KHR_xlib_surface`
+//! - Xcb: `VK_KHR_xcb_surface`
 //! - Metal: `VK_EXT_metal_surface`
 //!
 //! Use [`InstanceCreateInfo::enabled_extensions`](super::InstanceCreateInfo::enabled_extensions)
@@ -43,6 +41,10 @@ pub const KHR_SURFACE_EXTENSION: &str = "VK_KHR_surface";
 pub const KHR_WIN32_SURFACE_EXTENSION: &str = "VK_KHR_win32_surface";
 /// Required on Wayland Linux for [`Surface::from_wayland`].
 pub const KHR_WAYLAND_SURFACE_EXTENSION: &str = "VK_KHR_wayland_surface";
+/// Required on Xlib Linux / *BSD for [`Surface::from_xlib`].
+pub const KHR_XLIB_SURFACE_EXTENSION: &str = "VK_KHR_xlib_surface";
+/// Required on Xcb Linux / *BSD for [`Surface::from_xcb`].
+pub const KHR_XCB_SURFACE_EXTENSION: &str = "VK_KHR_xcb_surface";
 /// Required on macOS / iOS for [`Surface::from_metal`].
 pub const EXT_METAL_SURFACE_EXTENSION: &str = "VK_EXT_metal_surface";
 /// Required on every device that owns a swapchain.
@@ -131,6 +133,93 @@ impl Surface {
 
         let mut handle: VkSurfaceKHR = 0;
         // Safety: info is valid; caller has guaranteed pointer validity.
+        check(unsafe { create(instance.inner.handle, &info, std::ptr::null(), &mut handle) })?;
+
+        Ok(Self {
+            handle,
+            instance: Arc::clone(&instance.inner),
+        })
+    }
+
+    /// Create a `VkSurfaceKHR` from an Xlib `(Display*, Window)` pair.
+    ///
+    /// `display` is a pointer to an `Xlib` `Display` connection
+    /// (typically obtained from `XOpenDisplay`). `window` is the X11
+    /// window XID. The bindings generator emits `Window` as
+    /// `c_ulong`, which matches the C ABI on every platform that
+    /// implements Xlib.
+    ///
+    /// # Safety
+    ///
+    /// `display` must be a valid Xlib `Display*` for the lifetime of
+    /// the resulting `Surface`. `window` must be a valid X11 window
+    /// XID belonging to that display.
+    pub unsafe fn from_xlib(
+        instance: &Instance,
+        display: *mut std::ffi::c_void,
+        window: std::ffi::c_ulong,
+    ) -> Result<Self> {
+        let create = instance
+            .inner
+            .dispatch
+            .vkCreateXlibSurfaceKHR
+            .ok_or(Error::MissingFunction("vkCreateXlibSurfaceKHR"))?;
+
+        let info = VkXlibSurfaceCreateInfoKHR {
+            sType: VkStructureType::STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
+            // The bindings type the dpy field as `*mut Display` where
+            // Display is itself an opaque pointer alias, so the field
+            // type is `*mut *mut c_void`. Cast through the alias.
+            dpy: display as *mut _,
+            window,
+            ..Default::default()
+        };
+
+        let mut handle: VkSurfaceKHR = 0;
+        // Safety: info is valid for the call; instance handle is valid;
+        // the caller has guaranteed display + window are live.
+        check(unsafe { create(instance.inner.handle, &info, std::ptr::null(), &mut handle) })?;
+
+        Ok(Self {
+            handle,
+            instance: Arc::clone(&instance.inner),
+        })
+    }
+
+    /// Create a `VkSurfaceKHR` from an Xcb `(xcb_connection_t*, xcb_window_t)`
+    /// pair.
+    ///
+    /// `connection` is a pointer to an `xcb_connection_t` (typically
+    /// from `xcb_connect`). `window` is an `xcb_window_t` XID, which is
+    /// a `uint32_t` per the XCB ABI.
+    ///
+    /// # Safety
+    ///
+    /// `connection` must be a valid `xcb_connection_t*` for the lifetime
+    /// of the resulting `Surface`. `window` must be a valid window XID on
+    /// that connection.
+    pub unsafe fn from_xcb(
+        instance: &Instance,
+        connection: *mut std::ffi::c_void,
+        window: u32,
+    ) -> Result<Self> {
+        let create = instance
+            .inner
+            .dispatch
+            .vkCreateXcbSurfaceKHR
+            .ok_or(Error::MissingFunction("vkCreateXcbSurfaceKHR"))?;
+
+        let info = VkXcbSurfaceCreateInfoKHR {
+            sType: VkStructureType::STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR,
+            // Same alias-cast trick as Xlib.
+            connection: connection as *mut _,
+            window,
+            ..Default::default()
+        };
+
+        let mut handle: VkSurfaceKHR = 0;
+        // Safety: info is valid for the call; instance handle is valid;
+        // the caller has guaranteed connection + window are live.
         check(unsafe { create(instance.inner.handle, &info, std::ptr::null(), &mut handle) })?;
 
         Ok(Self {

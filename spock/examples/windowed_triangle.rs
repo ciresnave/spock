@@ -32,9 +32,10 @@ use spock::safe::{
     CommandPool, DeviceCreateInfo, EXT_METAL_SURFACE_EXTENSION, Fence, Framebuffer,
     GraphicsPipeline, GraphicsPipelineBuilder, GraphicsShaderStage, ImageLayout, ImageUsage,
     ImageView, Instance, InstanceCreateInfo, KHR_SURFACE_EXTENSION, KHR_SWAPCHAIN_EXTENSION,
-    KHR_WAYLAND_SURFACE_EXTENSION, KHR_WIN32_SURFACE_EXTENSION, PipelineLayout, PresentMode,
-    QueueCreateInfo, QueueFlags, RenderPass, RenderPassCreateInfo, Semaphore, ShaderModule,
-    SignalSemaphore, Surface, Swapchain, SwapchainCreateInfo, WaitSemaphore,
+    KHR_WAYLAND_SURFACE_EXTENSION, KHR_WIN32_SURFACE_EXTENSION, KHR_XCB_SURFACE_EXTENSION,
+    KHR_XLIB_SURFACE_EXTENSION, PipelineLayout, PresentMode, QueueCreateInfo, QueueFlags,
+    RenderPass, RenderPassCreateInfo, Semaphore, ShaderModule, SignalSemaphore, Surface, Swapchain,
+    SwapchainCreateInfo, WaitSemaphore,
 };
 
 const TITLE: &str = "spock — windowed triangle";
@@ -369,6 +370,8 @@ fn surface_extension_for(display: &RawDisplayHandle) -> Result<&'static str, Box
     Ok(match display {
         RawDisplayHandle::Windows(_) => KHR_WIN32_SURFACE_EXTENSION,
         RawDisplayHandle::Wayland(_) => KHR_WAYLAND_SURFACE_EXTENSION,
+        RawDisplayHandle::Xlib(_) => KHR_XLIB_SURFACE_EXTENSION,
+        RawDisplayHandle::Xcb(_) => KHR_XCB_SURFACE_EXTENSION,
         RawDisplayHandle::AppKit(_) => EXT_METAL_SURFACE_EXTENSION,
         other => return Err(format!("unsupported display handle: {other:?}").into()),
     })
@@ -394,6 +397,23 @@ unsafe fn make_surface(
         (RawDisplayHandle::Wayland(d), RawWindowHandle::Wayland(w)) => Ok(unsafe {
             Surface::from_wayland(instance, d.display.as_ptr(), w.surface.as_ptr())
         }?),
+        (RawDisplayHandle::Xlib(d), RawWindowHandle::Xlib(w)) => {
+            // winit gives Display as an Option (it can be None when the
+            // window was opened on the default display). Use null in that
+            // case — Vulkan will pick the default in turn.
+            let display = d
+                .display
+                .map(|p| p.as_ptr())
+                .unwrap_or(std::ptr::null_mut());
+            Ok(unsafe { Surface::from_xlib(instance, display, w.window) }?)
+        }
+        (RawDisplayHandle::Xcb(d), RawWindowHandle::Xcb(w)) => {
+            let connection = d
+                .connection
+                .map(|p| p.as_ptr())
+                .unwrap_or(std::ptr::null_mut());
+            Ok(unsafe { Surface::from_xcb(instance, connection, w.window.get()) }?)
+        }
         (RawDisplayHandle::AppKit(_), RawWindowHandle::AppKit(_)) => {
             Err("macOS Metal surface support requires creating a CAMetalLayer; not implemented in this example".into())
         }

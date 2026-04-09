@@ -48,6 +48,51 @@ fn test_safe_instance_creation_and_enumeration() {
 }
 
 #[test]
+fn test_xlib_xcb_surface_constructors_callable() {
+    // We can't actually open an X server from inside a Windows CI run,
+    // and the platform extensions are not enabled here, so the calls
+    // should land in the MissingFunction branch — proving the safe
+    // wrappers are reachable, type-correct, and round-trip the right
+    // diagnostic instead of UB. (On a real Linux desktop with the
+    // VK_KHR_xlib_surface / VK_KHR_xcb_surface extensions enabled and
+    // a valid display, the same calls would return Ok.)
+    use spock::safe::Surface;
+
+    let instance = match Instance::new(InstanceCreateInfo::default()) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("SKIP: cannot create Vulkan instance: {e}");
+            return;
+        }
+    };
+
+    // Synthetic, never-dereferenced pointers — only used so the call
+    // makes it past the unsafe block and into the dispatch lookup.
+    let fake_display: *mut std::ffi::c_void = std::ptr::null_mut();
+    let fake_window: std::ffi::c_ulong = 0;
+    match unsafe { Surface::from_xlib(&instance, fake_display, fake_window) } {
+        Err(spock::safe::Error::MissingFunction(name)) => {
+            assert_eq!(name, "vkCreateXlibSurfaceKHR");
+        }
+        Ok(_) => {
+            // If we somehow got a real surface (driver loaded the
+            // extension on its own), drop it cleanly.
+        }
+        Err(e) => panic!("expected MissingFunction or Ok, got {e:?}"),
+    }
+
+    let fake_connection: *mut std::ffi::c_void = std::ptr::null_mut();
+    let fake_xcb_window: u32 = 0;
+    match unsafe { Surface::from_xcb(&instance, fake_connection, fake_xcb_window) } {
+        Err(spock::safe::Error::MissingFunction(name)) => {
+            assert_eq!(name, "vkCreateXcbSurfaceKHR");
+        }
+        Ok(_) => {}
+        Err(e) => panic!("expected MissingFunction or Ok, got {e:?}"),
+    }
+}
+
+#[test]
 fn test_safe_device_creation_and_drop() {
     let instance = match Instance::new(InstanceCreateInfo::default()) {
         Ok(i) => i,
