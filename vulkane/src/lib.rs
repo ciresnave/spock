@@ -112,6 +112,11 @@ pub mod safe;
 // Re-export commonly used items at crate root for convenience
 pub use raw::bindings::*;
 
+// Re-export the derive macro when the `derive` feature is enabled,
+// so users can write `use vulkane::Vertex;` or `#[derive(vulkane::Vertex)]`.
+#[cfg(feature = "derive")]
+pub use vulkane_derive::Vertex;
+
 /// Version information for these bindings
 pub mod version {
     /// The version of these bindings

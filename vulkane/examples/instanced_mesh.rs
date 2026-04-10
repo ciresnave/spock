@@ -130,13 +130,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         VertexInputAttribute {
             location: 0,
             binding: 0,
-            format: Format(vulkane::raw::bindings::VkFormat::FORMAT_R32G32B32_SFLOAT),
+            format: Format::R32G32B32_SFLOAT,
             offset: 0,
         },
         VertexInputAttribute {
             location: 1,
             binding: 1,
-            format: Format(vulkane::raw::bindings::VkFormat::FORMAT_R32G32B32_SFLOAT),
+            format: Format::R32G32B32_SFLOAT,
             offset: 0,
         },
     ];

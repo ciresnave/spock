@@ -28,17 +28,98 @@ use std::sync::Arc;
 pub struct Format(pub VkFormat);
 
 impl Format {
+    // 8-bit per-channel
     pub const R8_UNORM: Self = Self(VkFormat::FORMAT_R8_UNORM);
+    pub const R8_SNORM: Self = Self(VkFormat::FORMAT_R8_SNORM);
+    pub const R8_UINT: Self = Self(VkFormat::FORMAT_R8_UINT);
+    pub const R8_SINT: Self = Self(VkFormat::FORMAT_R8_SINT);
+    pub const R8G8_UNORM: Self = Self(VkFormat::FORMAT_R8G8_UNORM);
+    pub const R8G8_UINT: Self = Self(VkFormat::FORMAT_R8G8_UINT);
     pub const R8G8B8A8_UNORM: Self = Self(VkFormat::FORMAT_R8G8B8A8_UNORM);
+    pub const R8G8B8A8_SNORM: Self = Self(VkFormat::FORMAT_R8G8B8A8_SNORM);
+    pub const R8G8B8A8_UINT: Self = Self(VkFormat::FORMAT_R8G8B8A8_UINT);
+    pub const R8G8B8A8_SINT: Self = Self(VkFormat::FORMAT_R8G8B8A8_SINT);
+    pub const R8G8B8A8_SRGB: Self = Self(VkFormat::FORMAT_R8G8B8A8_SRGB);
     pub const B8G8R8A8_UNORM: Self = Self(VkFormat::FORMAT_B8G8R8A8_UNORM);
     pub const B8G8R8A8_SRGB: Self = Self(VkFormat::FORMAT_B8G8R8A8_SRGB);
+
+    // 16-bit per-channel
+    pub const R16_UINT: Self = Self(VkFormat::FORMAT_R16_UINT);
+    pub const R16_SINT: Self = Self(VkFormat::FORMAT_R16_SINT);
+    pub const R16_SFLOAT: Self = Self(VkFormat::FORMAT_R16_SFLOAT);
+    pub const R16G16_SFLOAT: Self = Self(VkFormat::FORMAT_R16G16_SFLOAT);
+    pub const R16G16B16A16_SFLOAT: Self = Self(VkFormat::FORMAT_R16G16B16A16_SFLOAT);
+    pub const R16G16B16A16_UINT: Self = Self(VkFormat::FORMAT_R16G16B16A16_UINT);
+    pub const R16G16B16A16_UNORM: Self = Self(VkFormat::FORMAT_R16G16B16A16_UNORM);
+
+    // 32-bit per-channel
     pub const R32_UINT: Self = Self(VkFormat::FORMAT_R32_UINT);
+    pub const R32_SINT: Self = Self(VkFormat::FORMAT_R32_SINT);
     pub const R32_SFLOAT: Self = Self(VkFormat::FORMAT_R32_SFLOAT);
+    pub const R32G32_UINT: Self = Self(VkFormat::FORMAT_R32G32_UINT);
+    pub const R32G32_SINT: Self = Self(VkFormat::FORMAT_R32G32_SINT);
     pub const R32G32_SFLOAT: Self = Self(VkFormat::FORMAT_R32G32_SFLOAT);
+    pub const R32G32B32_UINT: Self = Self(VkFormat::FORMAT_R32G32B32_UINT);
     pub const R32G32B32_SFLOAT: Self = Self(VkFormat::FORMAT_R32G32B32_SFLOAT);
+    pub const R32G32B32A32_UINT: Self = Self(VkFormat::FORMAT_R32G32B32A32_UINT);
     pub const R32G32B32A32_SFLOAT: Self = Self(VkFormat::FORMAT_R32G32B32A32_SFLOAT);
+
+    // Depth / stencil
+    pub const D16_UNORM: Self = Self(VkFormat::FORMAT_D16_UNORM);
     pub const D32_SFLOAT: Self = Self(VkFormat::FORMAT_D32_SFLOAT);
     pub const D24_UNORM_S8_UINT: Self = Self(VkFormat::FORMAT_D24_UNORM_S8_UINT);
+    pub const D32_SFLOAT_S8_UINT: Self = Self(VkFormat::FORMAT_D32_SFLOAT_S8_UINT);
+
+    // Compressed (BC / DXT)
+    pub const BC1_RGB_UNORM: Self = Self(VkFormat::FORMAT_BC1_RGB_UNORM_BLOCK);
+    pub const BC1_RGB_SRGB: Self = Self(VkFormat::FORMAT_BC1_RGB_SRGB_BLOCK);
+    pub const BC3_UNORM: Self = Self(VkFormat::FORMAT_BC3_UNORM_BLOCK);
+    pub const BC3_SRGB: Self = Self(VkFormat::FORMAT_BC3_SRGB_BLOCK);
+    pub const BC5_UNORM: Self = Self(VkFormat::FORMAT_BC5_UNORM_BLOCK);
+    pub const BC7_UNORM: Self = Self(VkFormat::FORMAT_BC7_UNORM_BLOCK);
+    pub const BC7_SRGB: Self = Self(VkFormat::FORMAT_BC7_SRGB_BLOCK);
+
+    /// Returns the byte size per pixel for common uncompressed formats.
+    /// Returns `None` for compressed or unknown formats.
+    pub const fn bytes_per_pixel(&self) -> Option<u32> {
+        match self.0 {
+            VkFormat::FORMAT_R8_UNORM
+            | VkFormat::FORMAT_R8_SNORM
+            | VkFormat::FORMAT_R8_UINT
+            | VkFormat::FORMAT_R8_SINT => Some(1),
+            VkFormat::FORMAT_R8G8_UNORM
+            | VkFormat::FORMAT_R8G8_UINT
+            | VkFormat::FORMAT_R16_UINT
+            | VkFormat::FORMAT_R16_SINT
+            | VkFormat::FORMAT_R16_SFLOAT
+            | VkFormat::FORMAT_D16_UNORM => Some(2),
+            VkFormat::FORMAT_R8G8B8A8_UNORM
+            | VkFormat::FORMAT_R8G8B8A8_SNORM
+            | VkFormat::FORMAT_R8G8B8A8_UINT
+            | VkFormat::FORMAT_R8G8B8A8_SINT
+            | VkFormat::FORMAT_R8G8B8A8_SRGB
+            | VkFormat::FORMAT_B8G8R8A8_UNORM
+            | VkFormat::FORMAT_B8G8R8A8_SRGB
+            | VkFormat::FORMAT_R16G16_SFLOAT
+            | VkFormat::FORMAT_R32_UINT
+            | VkFormat::FORMAT_R32_SINT
+            | VkFormat::FORMAT_R32_SFLOAT
+            | VkFormat::FORMAT_D32_SFLOAT
+            | VkFormat::FORMAT_D24_UNORM_S8_UINT => Some(4),
+            VkFormat::FORMAT_R16G16B16A16_SFLOAT
+            | VkFormat::FORMAT_R16G16B16A16_UINT
+            | VkFormat::FORMAT_R16G16B16A16_UNORM
+            | VkFormat::FORMAT_R32G32_UINT
+            | VkFormat::FORMAT_R32G32_SINT
+            | VkFormat::FORMAT_R32G32_SFLOAT
+            | VkFormat::FORMAT_D32_SFLOAT_S8_UINT => Some(8),
+            VkFormat::FORMAT_R32G32B32_UINT
+            | VkFormat::FORMAT_R32G32B32_SFLOAT => Some(12),
+            VkFormat::FORMAT_R32G32B32A32_UINT
+            | VkFormat::FORMAT_R32G32B32A32_SFLOAT => Some(16),
+            _ => None,
+        }
+    }
 }
 
 /// Image layout — Vulkan tracks images through several access-pattern

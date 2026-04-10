@@ -1,0 +1,21 @@
+[package]
+name = "vulkane_derive"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Eric Evans <CireSnave@gmail.com>"]
+license = "MIT OR Apache-2.0"
+description = "Derive macros for the vulkane Vulkan bindings crate. Provides #[derive(Vertex)] for automatic vertex input layout generation."
+keywords = ["vulkan", "derive", "vertex", "graphics", "gpu"]
+categories = ["graphics", "development-tools::procedural-macro-helpers"]
+repository = "https://github.com/ciresnave/vulkane"
+homepage = "https://github.com/ciresnave/vulkane"
+documentation = "https://docs.rs/vulkane_derive"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"

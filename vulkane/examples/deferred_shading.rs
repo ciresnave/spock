@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // --- G-buffer images ---
     // R32G32B32A32_SFLOAT might not be available on all hardware.
     // Fall back to R16G16B16A16_SFLOAT which is universally supported.
-    let gbuf_format = Format(vulkane::raw::bindings::VkFormat::FORMAT_R16G16B16A16_SFLOAT);
+    let gbuf_format = Format::R16G16B16A16_SFLOAT;
 
     let (_g_pos_img, _g_pos_mem, g_pos_view) = Image::new_2d_bound(
         &device, &physical,

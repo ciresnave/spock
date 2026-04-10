@@ -83,14 +83,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. One-shot copy. The entire record-submit-wait dance in one call.
     queue.one_shot(&device, qf, |rec| {
-        rec.copy_buffer(&staging, &gpu_buf, &[BufferCopy { src_offset: 0, dst_offset: 0, size: SIZE }]);
+        rec.copy_buffer(&staging, &gpu_buf, &[BufferCopy::full(SIZE)]);
         Ok(())
     })?;
     println!("[OK] Copied staging → device-local via queue.one_shot()");
 
     // 4. Read it back (copy device → staging, then map).
     queue.one_shot(&device, qf, |rec| {
-        rec.copy_buffer(&gpu_buf, &staging, &[BufferCopy { src_offset: 0, dst_offset: 0, size: SIZE }]);
+        rec.copy_buffer(&gpu_buf, &staging, &[BufferCopy::full(SIZE)]);
         rec.memory_barrier(
             PipelineStage::TRANSFER,
             PipelineStage::HOST,

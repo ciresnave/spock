@@ -35,6 +35,17 @@ pub struct BufferCopy {
     pub size: u64,
 }
 
+impl BufferCopy {
+    /// Copy `size` bytes from offset 0 in both source and destination.
+    pub const fn full(size: u64) -> Self {
+        Self {
+            src_offset: 0,
+            dst_offset: 0,
+            size,
+        }
+    }
+}
+
 /// A safe wrapper around `VkCommandPool`.
 ///
 /// Command pools are destroyed automatically on drop. The handle keeps the

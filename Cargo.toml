@@ -1,6 +1,7 @@
 [workspace]
   members = [
     "vulkane",
+    "vulkane_derive",
     "vulkan_gen",
   ]
   resolver = "2"

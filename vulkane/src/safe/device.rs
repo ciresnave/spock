@@ -821,11 +821,7 @@ impl Queue {
             rec.copy_buffer(
                 &staging,
                 &gpu_buf,
-                &[BufferCopy {
-                    src_offset: 0,
-                    dst_offset: 0,
-                    size: byte_size,
-                }],
+                &[BufferCopy::full(byte_size)],
             );
             Ok(())
         })?;

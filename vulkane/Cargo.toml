@@ -1,6 +1,6 @@
 [package]
 name = "vulkane"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Eric Evans <CireSnave@gmail.com>"]
@@ -23,6 +23,8 @@ fetch-spec = []
 # Enable runtime GLSL/WGSL -> SPIR-V compilation via the `naga` crate.
 # Adds the `vulkane::safe::naga::compile_glsl` and `compile_wgsl` functions.
 naga = ["dep:naga"]
+# Enable #[derive(Vertex)] for automatic vertex input layout generation.
+derive = ["dep:vulkane_derive"]
 
 [dependencies]
 # Dynamic loading of the Vulkan runtime library
@@ -30,6 +32,8 @@ libloading = { workspace = true }
 # Optional: GLSL/WGSL -> SPIR-V compilation via Naga (the wgpu shader translator).
 # Pulls in glsl-in, wgsl-in and spv-out features only — no other backends.
 naga = { version = "29", optional = true, default-features = false, features = ["glsl-in", "wgsl-in", "spv-out"] }
+# Optional: derive macros for vertex layout generation.
+vulkane_derive = { path = "../vulkane_derive", version = "0.1", optional = true }
 
 [build-dependencies]
 # Path is used for development; the version is what crates.io uses
