@@ -94,7 +94,15 @@ fn resolve_vk_xml(
         .into());
     }
 
-    // 2. Check local copy relative to workspace
+    // 2a. Check bundled copy in the crate directory (ships with the published crate
+    //     so docs.rs and other sandboxed builds work without network access).
+    let bundled_path = PathBuf::from(manifest_dir).join("vk.xml");
+    if bundled_path.exists() {
+        println!("Using bundled vk.xml: {}", bundled_path.display());
+        return Ok(bundled_path);
+    }
+
+    // 2b. Check local copy relative to workspace
     let local_path = PathBuf::from(manifest_dir).join("../spec/registry/Vulkan-Docs/xml/vk.xml");
     if local_path.exists() {
         println!("Using local vk.xml: {}", local_path.display());
