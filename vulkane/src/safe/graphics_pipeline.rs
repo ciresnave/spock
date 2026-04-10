@@ -72,11 +72,43 @@ impl GraphicsShaderStage {
     }
 }
 
+/// Vertex input rate — per-vertex or per-instance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InputRate(pub VkVertexInputRate);
+
+impl InputRate {
+    pub const VERTEX: Self = Self(VkVertexInputRate::VERTEX_INPUT_RATE_VERTEX);
+    pub const INSTANCE: Self = Self(VkVertexInputRate::VERTEX_INPUT_RATE_INSTANCE);
+}
+
+impl Default for InputRate {
+    fn default() -> Self {
+        Self::VERTEX
+    }
+}
+
+/// Depth comparison operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompareOp(pub VkCompareOp);
+
+impl CompareOp {
+    pub const NEVER: Self = Self(VkCompareOp::COMPARE_OP_NEVER);
+    pub const LESS: Self = Self(VkCompareOp::COMPARE_OP_LESS);
+    pub const EQUAL: Self = Self(VkCompareOp::COMPARE_OP_EQUAL);
+    pub const LESS_OR_EQUAL: Self = Self(VkCompareOp::COMPARE_OP_LESS_OR_EQUAL);
+    pub const GREATER: Self = Self(VkCompareOp::COMPARE_OP_GREATER);
+    pub const NOT_EQUAL: Self = Self(VkCompareOp::COMPARE_OP_NOT_EQUAL);
+    pub const GREATER_OR_EQUAL: Self = Self(VkCompareOp::COMPARE_OP_GREATER_OR_EQUAL);
+    pub const ALWAYS: Self = Self(VkCompareOp::COMPARE_OP_ALWAYS);
+}
+
 /// One vertex buffer binding declaration.
 #[derive(Debug, Clone, Copy)]
 pub struct VertexInputBinding {
     pub binding: u32,
     pub stride: u32,
+    /// Per-vertex (default) or per-instance data advance rate.
+    pub input_rate: InputRate,
 }
 
 /// One vertex attribute (per-vertex shader input) declaration.
@@ -149,6 +181,13 @@ pub struct GraphicsPipelineBuilder<'a> {
     blend_enable: bool,
     depth_test: bool,
     depth_write: bool,
+    depth_compare_op: CompareOp,
+    depth_bias_enable: bool,
+    depth_bias_constant: f32,
+    depth_bias_slope: f32,
+    depth_bias_clamp: f32,
+    color_attachment_count: u32,
+    dynamic_viewport_scissor: bool,
 }
 
 impl<'a> GraphicsPipelineBuilder<'a> {
@@ -175,6 +214,13 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             blend_enable: false,
             depth_test: false,
             depth_write: false,
+            depth_compare_op: CompareOp::LESS_OR_EQUAL,
+            depth_bias_enable: false,
+            depth_bias_constant: 0.0,
+            depth_bias_slope: 0.0,
+            depth_bias_clamp: 0.0,
+            color_attachment_count: 1,
+            dynamic_viewport_scissor: false,
         }
     }
 
@@ -244,6 +290,45 @@ impl<'a> GraphicsPipelineBuilder<'a> {
         self
     }
 
+    /// Set the depth comparison operator. Default is
+    /// [`CompareOp::LESS_OR_EQUAL`]. Only meaningful when depth testing
+    /// is enabled via [`depth_test`](Self::depth_test).
+    pub fn depth_compare_op(mut self, op: CompareOp) -> Self {
+        self.depth_compare_op = op;
+        self
+    }
+
+    /// Enable depth bias (polygon offset) with the given factors.
+    /// Essential for shadow mapping to prevent shadow acne.
+    pub fn depth_bias(mut self, constant: f32, slope: f32, clamp: f32) -> Self {
+        self.depth_bias_enable = true;
+        self.depth_bias_constant = constant;
+        self.depth_bias_slope = slope;
+        self.depth_bias_clamp = clamp;
+        self
+    }
+
+    /// Set the number of color blend attachments. Default is 1.
+    /// For deferred / G-buffer rendering with multiple color
+    /// attachments, set this to match the render pass attachment
+    /// count. Each attachment uses the blend state from
+    /// [`alpha_blending`](Self::alpha_blending).
+    pub fn color_attachment_count(mut self, count: u32) -> Self {
+        self.color_attachment_count = count;
+        self
+    }
+
+    /// Enable dynamic viewport and scissor state. When set, the
+    /// pipeline is created without baked-in viewport/scissor values
+    /// and the user must call
+    /// [`set_viewport`](super::CommandBufferRecording::set_viewport) /
+    /// [`set_scissor`](super::CommandBufferRecording::set_scissor)
+    /// before each draw.
+    pub fn dynamic_viewport_scissor(mut self) -> Self {
+        self.dynamic_viewport_scissor = true;
+        self
+    }
+
     /// Compile the pipeline. Consumes the builder.
     pub fn build(self, device: &Device) -> Result<GraphicsPipeline> {
         let create = device
@@ -286,7 +371,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             .map(|b| VkVertexInputBindingDescription {
                 binding: b.binding,
                 stride: b.stride,
-                inputRate: VkVertexInputRate::VERTEX_INPUT_RATE_VERTEX,
+                inputRate: b.input_rate.0,
             })
             .collect();
         let raw_attributes: Vec<VkVertexInputAttributeDescription> = self
@@ -341,9 +426,17 @@ impl<'a> GraphicsPipelineBuilder<'a> {
         let viewport_state = VkPipelineViewportStateCreateInfo {
             sType: VkStructureType::STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
             viewportCount: 1,
-            pViewports: &viewport,
+            pViewports: if self.dynamic_viewport_scissor {
+                std::ptr::null()
+            } else {
+                &viewport
+            },
             scissorCount: 1,
-            pScissors: &scissor,
+            pScissors: if self.dynamic_viewport_scissor {
+                std::ptr::null()
+            } else {
+                &scissor
+            },
             ..Default::default()
         };
 
@@ -354,10 +447,10 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             polygonMode: self.polygon_mode.0,
             cullMode: self.cull_mode.0,
             frontFace: self.front_face.0,
-            depthBiasEnable: 0,
-            depthBiasConstantFactor: 0.0,
-            depthBiasClamp: 0.0,
-            depthBiasSlopeFactor: 0.0,
+            depthBiasEnable: if self.depth_bias_enable { 1 } else { 0 },
+            depthBiasConstantFactor: self.depth_bias_constant,
+            depthBiasClamp: self.depth_bias_clamp,
+            depthBiasSlopeFactor: self.depth_bias_slope,
             lineWidth: 1.0,
             ..Default::default()
         };
@@ -377,7 +470,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             sType: VkStructureType::STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
             depthTestEnable: if self.depth_test { 1 } else { 0 },
             depthWriteEnable: if self.depth_write { 1 } else { 0 },
-            depthCompareOp: VkCompareOp::COMPARE_OP_LESS_OR_EQUAL,
+            depthCompareOp: self.depth_compare_op.0,
             depthBoundsTestEnable: 0,
             stencilTestEnable: 0,
             front: VkStencilOpState::default(),
@@ -387,7 +480,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             ..Default::default()
         };
 
-        let color_blend_attachment = VkPipelineColorBlendAttachmentState {
+        let single_blend = VkPipelineColorBlendAttachmentState {
             blendEnable: if self.blend_enable { 1 } else { 0 },
             srcColorBlendFactor: VkBlendFactor::BLEND_FACTOR_SRC_ALPHA,
             dstColorBlendFactor: VkBlendFactor::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
@@ -398,14 +491,27 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             // VK_COLOR_COMPONENT_R_BIT | G | B | A = 0xF
             colorWriteMask: 0xF,
         };
+        let color_blend_attachments: Vec<VkPipelineColorBlendAttachmentState> =
+            vec![single_blend; self.color_attachment_count as usize];
 
         let color_blend_state = VkPipelineColorBlendStateCreateInfo {
             sType: VkStructureType::STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
             logicOpEnable: 0,
             logicOp: VkLogicOp::LOGIC_OP_COPY,
-            attachmentCount: 1,
-            pAttachments: &color_blend_attachment,
+            attachmentCount: color_blend_attachments.len() as u32,
+            pAttachments: color_blend_attachments.as_ptr(),
             blendConstants: [0.0; 4],
+            ..Default::default()
+        };
+
+        let dynamic_states = [
+            VkDynamicState::DYNAMIC_STATE_VIEWPORT,
+            VkDynamicState::DYNAMIC_STATE_SCISSOR,
+        ];
+        let dynamic_state_info = VkPipelineDynamicStateCreateInfo {
+            sType: VkStructureType::STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            dynamicStateCount: dynamic_states.len() as u32,
+            pDynamicStates: dynamic_states.as_ptr(),
             ..Default::default()
         };
 
@@ -421,7 +527,11 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             pMultisampleState: &multisample_state,
             pDepthStencilState: &depth_stencil_state,
             pColorBlendState: &color_blend_state,
-            pDynamicState: std::ptr::null(),
+            pDynamicState: if self.dynamic_viewport_scissor {
+                &dynamic_state_info
+            } else {
+                std::ptr::null()
+            },
             layout: self.layout.handle,
             renderPass: self.render_pass.handle,
             subpass: self.subpass,
@@ -459,7 +569,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             raster_state,
             multisample_state,
             depth_stencil_state,
-            color_blend_attachment,
+            color_blend_attachments,
             color_blend_state,
             vert_entry,
             frag_entry,

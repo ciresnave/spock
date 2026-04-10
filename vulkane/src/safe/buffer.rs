@@ -106,6 +106,32 @@ impl Buffer {
         })
     }
 
+    /// Create a buffer, allocate memory with the given property flags,
+    /// and bind them together in one call. Returns the buffer and its
+    /// backing [`DeviceMemory`].
+    ///
+    /// This is the middle-ground convenience between the manual 5-step
+    /// pattern and the full [`Allocator`](super::Allocator). Use it
+    /// for one-off allocations where you don't need sub-allocation
+    /// pooling.
+    pub fn new_bound(
+        device: &Device,
+        physical: &super::PhysicalDevice,
+        info: BufferCreateInfo,
+        memory_flags: super::MemoryPropertyFlags,
+    ) -> Result<(Buffer, DeviceMemory)> {
+        let buffer = Buffer::new(device, info)?;
+        let req = buffer.memory_requirements();
+        let type_index = physical
+            .find_memory_type(req.memory_type_bits, memory_flags)
+            .ok_or(Error::InvalidArgument(
+                "no compatible memory type for the requested property flags",
+            ))?;
+        let memory = DeviceMemory::allocate(device, req.size, type_index)?;
+        buffer.bind_memory(&memory, 0)?;
+        Ok((buffer, memory))
+    }
+
     /// Returns the raw `VkBuffer` handle.
     pub fn raw(&self) -> VkBuffer {
         self.handle

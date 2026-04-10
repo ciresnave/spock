@@ -170,13 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.image_barrier(
             PipelineStage::TOP_OF_PIPE,
             PipelineStage::TRANSFER,
-            ImageBarrier {
-                image: &image,
-                old_layout: ImageLayout::UNDEFINED,
-                new_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-                src_access: AccessFlags::NONE,
-                dst_access: AccessFlags::TRANSFER_WRITE,
-            },
+            ImageBarrier::color(&image, ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST_OPTIMAL, AccessFlags::NONE, AccessFlags::TRANSFER_WRITE),
         );
         // Upload pixels.
         rec.copy_buffer_to_image(
@@ -189,13 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.image_barrier(
             PipelineStage::TRANSFER,
             PipelineStage::COMPUTE_SHADER,
-            ImageBarrier {
-                image: &image,
-                old_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-                new_layout: ImageLayout::GENERAL,
-                src_access: AccessFlags::TRANSFER_WRITE,
-                dst_access: AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE,
-            },
+            ImageBarrier::color(&image, ImageLayout::TRANSFER_DST_OPTIMAL, ImageLayout::GENERAL, AccessFlags::TRANSFER_WRITE, AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE),
         );
 
         // Dispatch the invert shader.
@@ -207,13 +195,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.image_barrier(
             PipelineStage::COMPUTE_SHADER,
             PipelineStage::TRANSFER,
-            ImageBarrier {
-                image: &image,
-                old_layout: ImageLayout::GENERAL,
-                new_layout: ImageLayout::TRANSFER_SRC_OPTIMAL,
-                src_access: AccessFlags::SHADER_WRITE,
-                dst_access: AccessFlags::TRANSFER_READ,
-            },
+            ImageBarrier::color(&image, ImageLayout::GENERAL, ImageLayout::TRANSFER_SRC_OPTIMAL, AccessFlags::SHADER_WRITE, AccessFlags::TRANSFER_READ),
         );
         // Copy back to staging.
         rec.copy_image_to_buffer(

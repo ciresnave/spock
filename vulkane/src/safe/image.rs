@@ -163,6 +163,31 @@ impl Image {
         })
     }
 
+    /// Create a 2D image, allocate memory, bind, and create a color
+    /// [`ImageView`] — all in one call. Returns the image, its backing
+    /// [`DeviceMemory`], and the view.
+    ///
+    /// Always creates a color-aspect view; for depth images use
+    /// [`new_2d`](Self::new_2d) + [`ImageView::new_2d_depth`] manually.
+    pub fn new_2d_bound(
+        device: &Device,
+        physical: &super::PhysicalDevice,
+        info: Image2dCreateInfo,
+        memory_flags: super::MemoryPropertyFlags,
+    ) -> Result<(Image, super::DeviceMemory, ImageView)> {
+        let image = Image::new_2d(device, info)?;
+        let req = image.memory_requirements();
+        let type_index = physical
+            .find_memory_type(req.memory_type_bits, memory_flags)
+            .ok_or(Error::InvalidArgument(
+                "no compatible memory type for the requested property flags",
+            ))?;
+        let memory = super::DeviceMemory::allocate(device, req.size, type_index)?;
+        image.bind_memory(&memory, 0)?;
+        let view = ImageView::new_2d_color(&image)?;
+        Ok((image, memory, view))
+    }
+
     /// Returns the raw `VkImage` handle.
     pub fn raw(&self) -> VkImage {
         self.handle
@@ -260,6 +285,47 @@ impl ImageView {
 
         let mut handle: VkImageView = 0;
         // Safety: info is valid for the call, image handle is valid.
+        check(unsafe { create(image.device.handle, &info, std::ptr::null(), &mut handle) })?;
+
+        Ok(Self {
+            handle,
+            device: Arc::clone(&image.device),
+        })
+    }
+
+    /// Create a 2D depth view over the entire image — single mip, single
+    /// layer. Use this for depth attachments (e.g. shadow maps,
+    /// depth prepasses). The image must have a depth format like
+    /// [`Format::D32_SFLOAT`] or [`Format::D24_UNORM_S8_UINT`].
+    pub fn new_2d_depth(image: &Image) -> Result<Self> {
+        let create = image
+            .device
+            .dispatch
+            .vkCreateImageView
+            .ok_or(Error::MissingFunction("vkCreateImageView"))?;
+
+        let info = VkImageViewCreateInfo {
+            sType: VkStructureType::STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            image: image.handle,
+            viewType: VkImageViewType::IMAGE_VIEW_TYPE_2D,
+            format: image.format.0,
+            components: VkComponentMapping {
+                r: VkComponentSwizzle::COMPONENT_SWIZZLE_IDENTITY,
+                g: VkComponentSwizzle::COMPONENT_SWIZZLE_IDENTITY,
+                b: VkComponentSwizzle::COMPONENT_SWIZZLE_IDENTITY,
+                a: VkComponentSwizzle::COMPONENT_SWIZZLE_IDENTITY,
+            },
+            subresourceRange: VkImageSubresourceRange {
+                aspectMask: IMAGE_ASPECT_DEPTH_BIT,
+                baseMipLevel: 0,
+                levelCount: 1,
+                baseArrayLayer: 0,
+                layerCount: 1,
+            },
+            ..Default::default()
+        };
+
+        let mut handle: VkImageView = 0;
         check(unsafe { create(image.device.handle, &info, std::ptr::null(), &mut handle) })?;
 
         Ok(Self {
@@ -379,6 +445,11 @@ pub struct SamplerCreateInfo {
     pub address_mode_v: SamplerAddressMode,
     pub address_mode_w: SamplerAddressMode,
     pub anisotropy: Option<f32>,
+    /// Enable depth comparison sampling. When `Some(op)`, the sampler
+    /// performs a comparison against a reference depth value (as used by
+    /// `textureSampleCompare` in WGSL / `shadow2D` in GLSL). Essential
+    /// for shadow mapping.
+    pub compare_op: Option<super::CompareOp>,
 }
 
 impl Default for SamplerCreateInfo {
@@ -391,6 +462,7 @@ impl Default for SamplerCreateInfo {
             address_mode_v: SamplerAddressMode::CLAMP_TO_EDGE,
             address_mode_w: SamplerAddressMode::CLAMP_TO_EDGE,
             anisotropy: None,
+            compare_op: None,
         }
     }
 }
@@ -425,8 +497,10 @@ impl Sampler {
             mipLodBias: 0.0,
             anisotropyEnable: if info.anisotropy.is_some() { 1 } else { 0 },
             maxAnisotropy: info.anisotropy.unwrap_or(1.0),
-            compareEnable: 0,
-            compareOp: VkCompareOp::COMPARE_OP_NEVER,
+            compareEnable: if info.compare_op.is_some() { 1 } else { 0 },
+            compareOp: info
+                .compare_op
+                .map_or(VkCompareOp::COMPARE_OP_NEVER, |c| c.0),
             minLod: 0.0,
             maxLod: 0.0,
             borderColor: VkBorderColor::BORDER_COLOR_FLOAT_OPAQUE_BLACK,
@@ -466,11 +540,10 @@ impl Drop for Sampler {
     }
 }
 
-/// A simplified image memory barrier suitable for compute layout transitions.
+/// A simplified image memory barrier for layout transitions.
 ///
-/// Currently always operates on aspect=COLOR, mip=0, layer=0 — i.e., the
-/// "single-mip, single-layer, color image" case that covers all the
-/// 2D-storage-image patterns the safe wrapper supports today.
+/// Operates on a single mip level, single array layer. Use
+/// `aspect_mask` to select color or depth aspect (default: color).
 #[derive(Clone, Copy)]
 pub struct ImageBarrier<'a> {
     pub image: &'a Image,
@@ -478,4 +551,46 @@ pub struct ImageBarrier<'a> {
     pub new_layout: ImageLayout,
     pub src_access: super::AccessFlags,
     pub dst_access: super::AccessFlags,
+    /// Aspect mask: `IMAGE_ASPECT_COLOR_BIT` (default) or
+    /// `IMAGE_ASPECT_DEPTH_BIT`. Use the [`color`](Self::color) /
+    /// [`depth`](Self::depth) constructors for convenience.
+    pub aspect_mask: u32,
+}
+
+impl<'a> ImageBarrier<'a> {
+    /// Create a color-aspect image barrier.
+    pub fn color(
+        image: &'a Image,
+        old_layout: ImageLayout,
+        new_layout: ImageLayout,
+        src_access: super::AccessFlags,
+        dst_access: super::AccessFlags,
+    ) -> Self {
+        Self {
+            image,
+            old_layout,
+            new_layout,
+            src_access,
+            dst_access,
+            aspect_mask: IMAGE_ASPECT_COLOR_BIT,
+        }
+    }
+
+    /// Create a depth-aspect image barrier.
+    pub fn depth(
+        image: &'a Image,
+        old_layout: ImageLayout,
+        new_layout: ImageLayout,
+        src_access: super::AccessFlags,
+        dst_access: super::AccessFlags,
+    ) -> Self {
+        Self {
+            image,
+            old_layout,
+            new_layout,
+            src_access,
+            dst_access,
+            aspect_mask: IMAGE_ASPECT_DEPTH_BIT,
+        }
+    }
 }

@@ -1444,13 +1444,7 @@ fn test_image_buffer_round_trip_via_layout_transitions() {
         rec.image_barrier(
             PipelineStage::TOP_OF_PIPE,
             PipelineStage::TRANSFER,
-            ImageBarrier {
-                image: &image,
-                old_layout: ImageLayout::UNDEFINED,
-                new_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-                src_access: AccessFlags::NONE,
-                dst_access: AccessFlags::TRANSFER_WRITE,
-            },
+            ImageBarrier::color(&image, ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST_OPTIMAL, AccessFlags::NONE, AccessFlags::TRANSFER_WRITE),
         );
         // 2) Copy buffer -> image
         rec.copy_buffer_to_image(
@@ -1463,13 +1457,7 @@ fn test_image_buffer_round_trip_via_layout_transitions() {
         rec.image_barrier(
             PipelineStage::TRANSFER,
             PipelineStage::TRANSFER,
-            ImageBarrier {
-                image: &image,
-                old_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-                new_layout: ImageLayout::TRANSFER_SRC_OPTIMAL,
-                src_access: AccessFlags::TRANSFER_WRITE,
-                dst_access: AccessFlags::TRANSFER_READ,
-            },
+            ImageBarrier::color(&image, ImageLayout::TRANSFER_DST_OPTIMAL, ImageLayout::TRANSFER_SRC_OPTIMAL, AccessFlags::TRANSFER_WRITE, AccessFlags::TRANSFER_READ),
         );
         // 4) Copy image -> buffer
         rec.copy_image_to_buffer(

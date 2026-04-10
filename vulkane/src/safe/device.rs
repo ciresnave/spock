@@ -752,4 +752,191 @@ impl Queue {
         fence.wait(u64::MAX)?;
         Ok(())
     }
+
+    /// Upload a slice of `Copy` data into a new device-local buffer.
+    ///
+    /// Internally creates a staging buffer, maps and copies the data,
+    /// issues a one-shot `vkCmdCopyBuffer`, and waits. Returns a
+    /// device-local buffer ready for shader use.
+    ///
+    /// `usage` is ORed with `TRANSFER_DST` automatically so you only
+    /// need to specify the final usage (e.g. `BufferUsage::STORAGE_BUFFER`
+    /// or `BufferUsage::VERTEX_BUFFER`).
+    pub fn upload_buffer<T: Copy>(
+        &self,
+        device: &Device,
+        physical: &PhysicalDevice,
+        queue_family_index: u32,
+        data: &[T],
+        usage: super::BufferUsage,
+    ) -> Result<(super::Buffer, super::DeviceMemory)> {
+        use super::buffer::{Buffer, BufferCreateInfo};
+        use super::command::BufferCopy;
+
+        let byte_size = std::mem::size_of_val(data) as u64;
+
+        // Staging (host-visible, TRANSFER_SRC).
+        let (staging, mut staging_mem) = Buffer::new_bound(
+            device,
+            physical,
+            BufferCreateInfo {
+                size: byte_size,
+                usage: super::BufferUsage::TRANSFER_SRC,
+            },
+            super::MemoryPropertyFlags::HOST_VISIBLE | super::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
+        {
+            let mut m = staging_mem.map()?;
+            let src = unsafe {
+                std::slice::from_raw_parts(data.as_ptr() as *const u8, byte_size as usize)
+            };
+            m.as_slice_mut()[..byte_size as usize].copy_from_slice(src);
+        }
+
+        // Device-local (TRANSFER_DST | user usage).
+        let (gpu_buf, gpu_mem) = Buffer::new_bound(
+            device,
+            physical,
+            BufferCreateInfo {
+                size: byte_size,
+                usage: super::BufferUsage::TRANSFER_DST | usage,
+            },
+            super::MemoryPropertyFlags::DEVICE_LOCAL,
+        )
+        .or_else(|_| {
+            // Fallback for integrated GPUs without a separate device-local heap.
+            Buffer::new_bound(
+                device,
+                physical,
+                BufferCreateInfo {
+                    size: byte_size,
+                    usage: super::BufferUsage::TRANSFER_DST | usage,
+                },
+                super::MemoryPropertyFlags::HOST_VISIBLE,
+            )
+        })?;
+
+        // One-shot copy.
+        self.one_shot(device, queue_family_index, |rec| {
+            rec.copy_buffer(
+                &staging,
+                &gpu_buf,
+                &[BufferCopy {
+                    src_offset: 0,
+                    dst_offset: 0,
+                    size: byte_size,
+                }],
+            );
+            Ok(())
+        })?;
+
+        Ok((gpu_buf, gpu_mem))
+    }
+
+    /// Upload RGBA8 pixel data into a new device-local sampled image.
+    ///
+    /// Creates a staging buffer, copies the pixels, issues a one-shot
+    /// command buffer with layout transitions
+    /// (`UNDEFINED → TRANSFER_DST → SHADER_READ_ONLY`), and waits.
+    /// Returns a device-local image + color view ready for sampling.
+    ///
+    /// `pixels` must be exactly `width * height * 4` bytes of
+    /// tightly-packed RGBA8 data.
+    pub fn upload_image_rgba(
+        &self,
+        device: &Device,
+        physical: &PhysicalDevice,
+        queue_family_index: u32,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+    ) -> Result<(super::Image, super::DeviceMemory, super::ImageView)> {
+        use super::buffer::{Buffer, BufferCreateInfo};
+        use super::flags::AccessFlags;
+        use super::image::{
+            BufferImageCopy, Image, Image2dCreateInfo, ImageBarrier, ImageView,
+        };
+
+        let byte_size = (width as u64) * (height as u64) * 4;
+        assert_eq!(
+            pixels.len() as u64, byte_size,
+            "upload_image_rgba: pixels.len() must be width * height * 4"
+        );
+
+        // Staging buffer.
+        let (staging, mut staging_mem) = Buffer::new_bound(
+            device,
+            physical,
+            BufferCreateInfo {
+                size: byte_size,
+                usage: super::BufferUsage::TRANSFER_SRC,
+            },
+            super::MemoryPropertyFlags::HOST_VISIBLE | super::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
+        {
+            let mut m = staging_mem.map()?;
+            m.as_slice_mut()[..pixels.len()].copy_from_slice(pixels);
+        }
+
+        // Device-local image (TRANSFER_DST | SAMPLED).
+        let image = Image::new_2d(
+            device,
+            Image2dCreateInfo {
+                format: super::Format::R8G8B8A8_UNORM,
+                width,
+                height,
+                usage: super::ImageUsage::TRANSFER_DST | super::ImageUsage::SAMPLED,
+            },
+        )?;
+        let req = image.memory_requirements();
+        let type_index = physical
+            .find_memory_type(req.memory_type_bits, super::MemoryPropertyFlags::DEVICE_LOCAL)
+            .or_else(|| {
+                physical.find_memory_type(
+                    req.memory_type_bits,
+                    super::MemoryPropertyFlags::HOST_VISIBLE,
+                )
+            })
+            .ok_or(Error::InvalidArgument(
+                "no compatible memory type for sampled image",
+            ))?;
+        let img_mem = super::DeviceMemory::allocate(device, req.size, type_index)?;
+        image.bind_memory(&img_mem, 0)?;
+        let view = ImageView::new_2d_color(&image)?;
+
+        // One-shot: transition → copy → transition.
+        self.one_shot(device, queue_family_index, |rec| {
+            rec.image_barrier(
+                PipelineStage::TOP_OF_PIPE,
+                PipelineStage::TRANSFER,
+                ImageBarrier::color(
+                    &image,
+                    super::ImageLayout::UNDEFINED,
+                    super::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    AccessFlags::NONE,
+                    AccessFlags::TRANSFER_WRITE,
+                ),
+            );
+            rec.copy_buffer_to_image(
+                &staging,
+                &image,
+                super::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[BufferImageCopy::full_2d(width, height)],
+            );
+            rec.image_barrier(
+                PipelineStage::TRANSFER,
+                PipelineStage::FRAGMENT_SHADER,
+                ImageBarrier::color(
+                    &image,
+                    super::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    super::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    AccessFlags::TRANSFER_WRITE,
+                    AccessFlags::SHADER_READ,
+                ),
+            );
+            Ok(())
+        })?;
+
+        Ok((image, img_mem, view))
+    }
 }

@@ -12,6 +12,18 @@ use super::{Buffer, Device, Error, Result, check};
 use crate::raw::bindings::*;
 use std::sync::Arc;
 
+/// A clear value for [`begin_render_pass_ext`](CommandBufferRecording::begin_render_pass_ext).
+///
+/// Use [`Color`](Self::Color) for color attachments and
+/// [`DepthStencil`](Self::DepthStencil) for depth/stencil attachments.
+#[derive(Debug, Clone, Copy)]
+pub enum ClearValue {
+    /// RGBA float clear color (e.g. `[0.0, 0.0, 0.0, 1.0]` for black).
+    Color([f32; 4]),
+    /// Depth + stencil clear (e.g. `depth: 1.0, stencil: 0`).
+    DepthStencil { depth: f32, stencil: u32 },
+}
+
 /// One source -> destination region for [`CommandBufferRecording::copy_buffer`].
 #[derive(Debug, Clone, Copy)]
 pub struct BufferCopy {
@@ -410,7 +422,7 @@ impl<'a> CommandBufferRecording<'a> {
             dstQueueFamilyIndex: !0u32,
             image: barrier.image.handle,
             subresourceRange: VkImageSubresourceRange {
-                aspectMask: IMAGE_ASPECT_COLOR_BIT,
+                aspectMask: barrier.aspect_mask,
                 baseMipLevel: 0,
                 levelCount: 1,
                 baseArrayLayer: 0,
@@ -544,7 +556,7 @@ impl<'a> CommandBufferRecording<'a> {
             dstQueueFamilyIndex: !0u32,
             image: barrier.image.handle,
             subresourceRange: VkImageSubresourceRange {
-                aspectMask: IMAGE_ASPECT_COLOR_BIT,
+                aspectMask: barrier.aspect_mask,
                 baseMipLevel: 0,
                 levelCount: 1,
                 baseArrayLayer: 0,
@@ -689,6 +701,66 @@ impl<'a> CommandBufferRecording<'a> {
         };
         // VK_SUBPASS_CONTENTS_INLINE = 0
         // Safety: command buffer is recording, info+raw_clears live until call end.
+        unsafe {
+            cmd(
+                self.buffer.handle,
+                &info,
+                VkSubpassContents::SUBPASS_CONTENTS_INLINE,
+            )
+        };
+    }
+
+    /// Like [`begin_render_pass`](Self::begin_render_pass), but accepts
+    /// [`ClearValue`] entries so you can mix color and depth/stencil
+    /// clears in a single render pass (e.g. one color attachment + one
+    /// depth attachment).
+    pub fn begin_render_pass_ext(
+        &mut self,
+        render_pass: &RenderPass,
+        framebuffer: &Framebuffer,
+        clear_values: &[ClearValue],
+    ) {
+        let cmd = self
+            .buffer
+            .device
+            .dispatch
+            .vkCmdBeginRenderPass
+            .expect("vkCmdBeginRenderPass is required by Vulkan 1.0");
+
+        let raw_clears: Vec<VkClearValue> = clear_values
+            .iter()
+            .map(|cv| match cv {
+                ClearValue::Color(c) => VkClearValue {
+                    color: VkClearColorValue { float32: *c },
+                },
+                ClearValue::DepthStencil { depth, stencil } => VkClearValue {
+                    depthStencil: VkClearDepthStencilValue {
+                        depth: *depth,
+                        stencil: *stencil,
+                    },
+                },
+            })
+            .collect();
+
+        let info = VkRenderPassBeginInfo {
+            sType: VkStructureType::STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+            renderPass: render_pass.handle,
+            framebuffer: framebuffer.handle,
+            renderArea: VkRect2D {
+                offset: VkOffset2D { x: 0, y: 0 },
+                extent: VkExtent2D {
+                    width: framebuffer.width,
+                    height: framebuffer.height,
+                },
+            },
+            clearValueCount: raw_clears.len() as u32,
+            pClearValues: if raw_clears.is_empty() {
+                std::ptr::null()
+            } else {
+                raw_clears.as_ptr()
+            },
+            ..Default::default()
+        };
         unsafe {
             cmd(
                 self.buffer.handle,

@@ -101,7 +101,7 @@ pub use allocator::{
     Allocator, DefragmentationMove, DefragmentationPlan, PoolCreateInfo, PoolHandle,
 };
 pub use buffer::{Buffer, BufferCreateInfo, BufferUsage};
-pub use command::{BufferCopy, CommandBuffer, CommandBufferRecording, CommandPool};
+pub use command::{BufferCopy, ClearValue, CommandBuffer, CommandBufferRecording, CommandPool};
 pub use debug::{
     DebugCallback, DebugMessage, DebugMessageSeverity, DebugMessageType, default_callback,
 };
@@ -115,8 +115,9 @@ pub use device::{
 pub use features::DeviceFeatures;
 pub use flags::{AccessFlags, AccessFlags2, PipelineStage, PipelineStage2};
 pub use graphics_pipeline::{
-    CullMode, FrontFace, GraphicsPipeline, GraphicsPipelineBuilder, GraphicsShaderStage,
-    PolygonMode, PrimitiveTopology, VertexInputAttribute, VertexInputBinding,
+    CompareOp, CullMode, FrontFace, GraphicsPipeline, GraphicsPipelineBuilder,
+    GraphicsShaderStage, InputRate, PolygonMode, PrimitiveTopology, VertexInputAttribute,
+    VertexInputBinding,
 };
 pub use image::{
     BufferImageCopy, Format, Image, Image2dCreateInfo, ImageBarrier, ImageLayout, ImageUsage,

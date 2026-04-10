@@ -266,13 +266,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.image_barrier(
             PipelineStage::TOP_OF_PIPE,
             PipelineStage::TRANSFER,
-            ImageBarrier {
-                image: &texture,
-                old_layout: ImageLayout::UNDEFINED,
-                new_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-                src_access: AccessFlags::NONE,
-                dst_access: AccessFlags::TRANSFER_WRITE,
-            },
+            ImageBarrier::color(&texture, ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST_OPTIMAL, AccessFlags::NONE, AccessFlags::TRANSFER_WRITE),
         );
         // Upload texture from staging buffer.
         rec.copy_buffer_to_image(
@@ -285,13 +279,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.image_barrier(
             PipelineStage::TRANSFER,
             PipelineStage::FRAGMENT_SHADER,
-            ImageBarrier {
-                image: &texture,
-                old_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-                new_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                src_access: AccessFlags::TRANSFER_WRITE,
-                dst_access: AccessFlags::SHADER_READ,
-            },
+            ImageBarrier::color(&texture, ImageLayout::TRANSFER_DST_OPTIMAL, ImageLayout::SHADER_READ_ONLY_OPTIMAL, AccessFlags::TRANSFER_WRITE, AccessFlags::SHADER_READ),
         );
 
         // Begin render pass on the color attachment, draw the textured quad.
