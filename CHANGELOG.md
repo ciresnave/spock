@@ -5,6 +5,12 @@ All notable changes to vulkane will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] — 2026-04-15
+
+### Documentation
+
+- Sync the crate-level `vulkane/README.md` (shown on crates.io and docs.rs) with the repo-root README: add the `shaderc` feature entry, the runtime-shader-compilation section, the naga-vs-shaderc selection table, and shaderc build requirements. The 0.4.3 release updated only the repo-root copy.
+
 ## [0.4.3] — 2026-04-15
 
 ### Added
