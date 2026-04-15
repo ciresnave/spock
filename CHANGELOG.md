@@ -5,6 +5,19 @@ All notable changes to vulkane will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] — 2026-04-15
+
+### Added
+
+- **Optional `slang` feature** — runtime Slang → SPIR-V compilation via the `shader-slang` crate (Khronos Slang compiler). Slang adds modules, generics, interfaces, and — most relevant for ML compute on Vulkan — built-in automatic differentiation: tag a function `[Differentiable]` and request forward and backward entry points from the same compiled module.
+  - `vulkane::safe::slang::SlangSession::{new, with_search_paths, load_file}` — session-based API for compiling one module into many entry-point SPIR-V blobs.
+  - `vulkane::safe::slang::SlangModule::compile_entry_point(name) -> Result<Vec<u32>, SlangError>`.
+  - `vulkane::safe::slang::compile_slang_file(search_dir, module, entry)` — one-shot convenience.
+  - Re-exports `CompileTarget`, `OptimizationLevel`, `Stage` from `shader-slang`.
+  - New `Error::SlangCompile(String)` variant bridged from `SlangError`.
+  - Requires `VULKAN_SDK` (SDK ships `slangc`) or `SLANG_DIR` at build/link time; `slang.dll` / `libslang.so` must be on the runtime library search path.
+  - **Current limitation**: `shader-slang` 0.1.0 does not expose inline source compilation; Slang modules must live in `.slang` files resolved through session search paths. Will be lifted when a newer `shader-slang` ships.
+
 ## [0.4.4] — 2026-04-15
 
 ### Documentation

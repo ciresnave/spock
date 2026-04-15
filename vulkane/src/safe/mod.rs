@@ -77,6 +77,8 @@ mod memory;
 pub mod naga;
 #[cfg(feature = "shaderc")]
 pub mod shaderc;
+#[cfg(feature = "slang")]
+pub mod slang;
 mod physical;
 mod pipeline;
 mod query;
@@ -169,6 +171,11 @@ pub enum Error {
     /// Only emitted when the `shaderc` Cargo feature is enabled.
     #[cfg(feature = "shaderc")]
     ShadercCompile(String),
+
+    /// Slang-to-SPIR-V compilation via [`shader-slang`] failed.
+    /// Only emitted when the `slang` Cargo feature is enabled.
+    #[cfg(feature = "slang")]
+    SlangCompile(String),
 }
 
 impl std::fmt::Display for Error {
@@ -183,6 +190,8 @@ impl std::fmt::Display for Error {
             Self::NagaCompile(s) => write!(f, "GLSL compilation failed: {s}"),
             #[cfg(feature = "shaderc")]
             Self::ShadercCompile(s) => write!(f, "shaderc compilation failed: {s}"),
+            #[cfg(feature = "slang")]
+            Self::SlangCompile(s) => write!(f, "Slang compilation failed: {s}"),
         }
     }
 }
