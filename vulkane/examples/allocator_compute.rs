@@ -16,9 +16,9 @@
 use vulkane::safe::{
     AccessFlags, AllocationCreateInfo, AllocationUsage, Allocator, ApiVersion, BufferCreateInfo,
     BufferUsage, CommandPool, ComputePipeline, DescriptorPool, DescriptorPoolSize,
-    DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType,
-    DeviceCreateInfo, Fence, Instance, InstanceCreateInfo, PipelineLayout, PipelineStage,
-    QueueCreateInfo, QueueFlags, ShaderModule, ShaderStageFlags,
+    DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType, DeviceCreateInfo, Fence,
+    Instance, InstanceCreateInfo, PipelineLayout, PipelineStage, QueueCreateInfo, QueueFlags,
+    ShaderModule, ShaderStageFlags,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -9,9 +9,9 @@
 //! 4. Creating a logical device with a graphics queue
 //! 5. Cleaning up
 
+use std::ffi::CStr;
 use vulkane::raw::bindings::*;
 use vulkane::raw::{VkResultExt, VulkanLibrary};
-use std::ffi::CStr;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load the Vulkan shared library

@@ -20,9 +20,63 @@
 //! mapping.
 
 use super::device::DeviceInner;
+use super::pnext::PNextChain;
 use super::{Device, Error, Result, check};
 use crate::raw::bindings::*;
 use std::sync::Arc;
+
+/// Parameters for [`DeviceMemory::allocate_with`].
+///
+/// Use this when a plain `(size, memory_type_index)` allocation isn't
+/// enough — typically because you need to chain an extension struct
+/// onto the allocation's `pNext`:
+///
+/// - `VkMemoryAllocateFlagsInfo` for `bufferDeviceAddress` or device
+///   masks on a multi-GPU group.
+/// - `VkExportMemoryAllocateInfo` / `VkExportMemoryAllocateInfoKHR` for
+///   `VK_KHR_external_memory` interop with CUDA, HIP, or DX12.
+/// - `VkMemoryDedicatedAllocateInfo` for resources the driver asks you
+///   to bind to a dedicated allocation.
+///
+/// Every extension struct auto-implements
+/// [`PNextChainable`](crate::raw::PNextChainable) and has a
+/// `::new_pnext()` constructor, so building the chain is:
+///
+/// ```ignore
+/// let mut chain = PNextChain::new();
+/// let mut export = VkExportMemoryAllocateInfo::new_pnext();
+/// export.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT as u32;
+/// chain.push(export);
+/// let mem = DeviceMemory::allocate_with(&device, &MemoryAllocateInfo {
+///     size: req.size,
+///     memory_type_index: mt,
+///     pnext: Some(&chain),
+/// })?;
+/// ```
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MemoryAllocateInfo<'a> {
+    /// Size in bytes. Must be ≥ the `size` reported by
+    /// `vkGet*MemoryRequirements` for the resource you intend to bind.
+    pub size: u64,
+    /// Index into `VkPhysicalDeviceMemoryProperties.memoryTypes` selecting
+    /// which heap + property flags the allocation comes from.
+    pub memory_type_index: u32,
+    /// Optional `pNext` chain to attach to `VkMemoryAllocateInfo`. The
+    /// chain is borrowed for the duration of the call and does not need
+    /// to outlive the returned [`DeviceMemory`].
+    pub pnext: Option<&'a PNextChain>,
+    /// Optional `VK_EXT_memory_priority` hint in `[0.0, 1.0]`. `0.5` is
+    /// the implicit default the driver uses when no priority is
+    /// specified. Higher values make the allocation less likely to be
+    /// evicted or demoted to system memory under pressure.
+    ///
+    /// When `Some`, a `VkMemoryPriorityAllocateInfoEXT` is automatically
+    /// prepended to whatever the caller passed in [`pnext`](Self::pnext)
+    /// — no manual chain manipulation is needed. Requires
+    /// `VK_EXT_memory_priority` to be enabled on the device; otherwise
+    /// the driver silently ignores the chained struct.
+    pub priority: Option<f32>,
+}
 
 /// Strongly-typed wrapper around `VkMemoryPropertyFlags`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,27 +113,73 @@ pub struct DeviceMemory {
 
 impl DeviceMemory {
     /// Allocate device memory of the given size from the given memory type index.
+    ///
+    /// For allocations that need extension-struct `pNext` chaining (external
+    /// memory export, buffer-device-address flags, dedicated allocations, …)
+    /// use [`allocate_with`](Self::allocate_with) with a [`MemoryAllocateInfo`]
+    /// instead.
     pub fn allocate(device: &Device, size: u64, memory_type_index: u32) -> Result<Self> {
+        Self::allocate_with(
+            device,
+            &MemoryAllocateInfo {
+                size,
+                memory_type_index,
+                pnext: None,
+                priority: None,
+            },
+        )
+    }
+
+    /// Allocate device memory with a fully-specified [`MemoryAllocateInfo`],
+    /// including an optional `pNext` chain for extension structs.
+    pub fn allocate_with(device: &Device, info: &MemoryAllocateInfo<'_>) -> Result<Self> {
         let allocate = device
             .inner
             .dispatch
             .vkAllocateMemory
             .ok_or(Error::MissingFunction("vkAllocateMemory"))?;
 
-        let info = VkMemoryAllocateInfo {
+        // If `priority` is set, build a local chain that prepends a
+        // VkMemoryPriorityAllocateInfoEXT to whatever the caller passed.
+        // If only `pnext` is set we can use the caller's chain pointer
+        // directly; if neither, the head is null.
+        let local_chain: Option<PNextChain> = info.priority.map(|p| {
+            let mut chain = PNextChain::new();
+            chain.push(VkMemoryPriorityAllocateInfoEXT {
+                sType: VkStructureType::STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT,
+                pNext: std::ptr::null(),
+                priority: p,
+            });
+            if let Some(user) = info.pnext {
+                chain.append(user.clone());
+            }
+            chain
+        });
+
+        let p_next = if let Some(chain) = local_chain.as_ref() {
+            chain.head()
+        } else {
+            info.pnext.map_or(std::ptr::null(), |c| c.head())
+        };
+
+        let raw = VkMemoryAllocateInfo {
             sType: VkStructureType::STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            pNext: std::ptr::null(),
-            allocationSize: size,
-            memoryTypeIndex: memory_type_index,
+            pNext: p_next,
+            allocationSize: info.size,
+            memoryTypeIndex: info.memory_type_index,
         };
 
         let mut handle: VkDeviceMemory = 0;
-        // Safety: info is valid for the call, device handle is valid.
-        check(unsafe { allocate(device.inner.handle, &info, std::ptr::null(), &mut handle) })?;
+        // Safety: raw is valid for the call, device handle is valid. The
+        // optional pNext chain — either `local_chain` or the caller's
+        // borrowed one — lives for the duration of this synchronous
+        // call.
+        check(unsafe { allocate(device.inner.handle, &raw, std::ptr::null(), &mut handle) })?;
+        drop(local_chain);
 
         Ok(Self {
             handle,
-            size,
+            size: info.size,
             device: Arc::clone(&device.inner),
         })
     }

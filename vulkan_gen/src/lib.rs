@@ -34,12 +34,11 @@ pub fn generate_bindings(
         .ok_or("output_path must have a parent directory")?;
 
     let features_out = out_dir.join("device_features_generated.rs");
-    let n_features =
-        codegen::generator_modules::device_features_gen::generate_device_features(
-            intermediate_dir,
-            &features_out,
-        )
-        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+    let n_features = codegen::generator_modules::device_features_gen::generate_device_features(
+        intermediate_dir,
+        &features_out,
+    )
+    .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
     codegen::logging::log_info(&format!(
         "Generated DeviceFeatures with {} feature-bit methods",
         n_features
@@ -80,6 +79,21 @@ pub fn generate_bindings(
         cmd_stats.queue_methods,
         cmd_stats.command_buffer_methods,
         cmd_stats.skipped
+    ));
+
+    let ergonomic_stats = codegen::generator_modules::safe_ergonomic_gen::generate_safe_ergonomic(
+        intermediate_dir,
+        out_dir,
+    )
+    .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+    codegen::logging::log_info(&format!(
+        "Generated ergonomic-trait methods: Device={}, Instance={}, PhysicalDevice={}, Queue={}, CommandBuffer={} ({} skipped as unsupported shape)",
+        ergonomic_stats.device_methods,
+        ergonomic_stats.instance_methods,
+        ergonomic_stats.physical_device_methods,
+        ergonomic_stats.queue_methods,
+        ergonomic_stats.command_buffer_methods,
+        ergonomic_stats.skipped
     ));
 
     Ok(())

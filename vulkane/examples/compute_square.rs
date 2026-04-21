@@ -173,7 +173,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.dispatch(group_count_x, 1, 1);
 
         // Memory barrier so the host read after fence wait sees the GPU writes.
-        rec.memory_barrier(PipelineStage::COMPUTE_SHADER, PipelineStage::HOST, AccessFlags::SHADER_WRITE, AccessFlags::HOST_READ);
+        rec.memory_barrier(
+            PipelineStage::COMPUTE_SHADER,
+            PipelineStage::HOST,
+            AccessFlags::SHADER_WRITE,
+            AccessFlags::HOST_READ,
+        );
 
         rec.end()?;
     }

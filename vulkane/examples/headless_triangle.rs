@@ -33,7 +33,6 @@ const H: u32 = 256;
 const PIXEL_BYTES: u64 = 4;
 const BUF_SIZE: u64 = (W as u64) * (H as u64) * PIXEL_BYTES;
 
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Load shaders.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -164,7 +163,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[BufferImageCopy::full_2d(W, H)],
         );
         // Transfer -> Host
-        rec.memory_barrier(PipelineStage::TRANSFER, PipelineStage::HOST, AccessFlags::TRANSFER_WRITE, AccessFlags::HOST_READ);
+        rec.memory_barrier(
+            PipelineStage::TRANSFER,
+            PipelineStage::HOST,
+            AccessFlags::TRANSFER_WRITE,
+            AccessFlags::HOST_READ,
+        );
 
         rec.end()?;
     }

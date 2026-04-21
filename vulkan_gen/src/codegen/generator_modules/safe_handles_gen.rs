@@ -108,7 +108,10 @@ fn find_create_command<'a>(
     commands: &'a [VulkanCommand],
 ) -> Option<&'a VulkanCommand> {
     let stripped = handle_name.strip_prefix("Vk")?;
-    let candidates: [String; 2] = [format!("vkCreate{}", stripped), format!("vkAllocate{}", stripped)];
+    let candidates: [String; 2] = [
+        format!("vkCreate{}", stripped),
+        format!("vkAllocate{}", stripped),
+    ];
     for cmd in commands {
         if cmd.is_alias {
             continue;
@@ -140,7 +143,10 @@ fn find_destroy_command<'a>(
     commands: &'a [VulkanCommand],
 ) -> Option<&'a VulkanCommand> {
     let stripped = handle_name.strip_prefix("Vk")?;
-    let candidates: [String; 2] = [format!("vkDestroy{}", stripped), format!("vkFree{}", stripped)];
+    let candidates: [String; 2] = [
+        format!("vkDestroy{}", stripped),
+        format!("vkFree{}", stripped),
+    ];
     for cmd in commands {
         if cmd.is_alias {
             continue;
@@ -203,10 +209,7 @@ fn emit_wrapper(cand: &Candidate) -> String {
     // Dispatchable handles are `*mut c_void` and initialise to
     // `std::ptr::null_mut()`; non-dispatchable handles are `u64` and
     // initialise to `0`. Detect via the macro used in vk.xml.
-    let is_dispatchable = cand
-        .handle
-        .raw_content
-        .contains("VK_DEFINE_HANDLE(");
+    let is_dispatchable = cand.handle.raw_content.contains("VK_DEFINE_HANDLE(");
     let zero_init = if is_dispatchable {
         "std::ptr::null_mut()"
     } else {
@@ -441,8 +444,16 @@ mod tests {
             "vkCreateFoo",
             vec![
                 mk_param("device", "VkDevice", "VkDevice device"),
-                mk_param("pCreateInfo", "VkFooCreateInfo", "const VkFooCreateInfo* pCreateInfo"),
-                mk_param("pAllocator", "VkAllocationCallbacks", "const VkAllocationCallbacks* pAllocator"),
+                mk_param(
+                    "pCreateInfo",
+                    "VkFooCreateInfo",
+                    "const VkFooCreateInfo* pCreateInfo",
+                ),
+                mk_param(
+                    "pAllocator",
+                    "VkAllocationCallbacks",
+                    "const VkAllocationCallbacks* pAllocator",
+                ),
                 mk_param("pHandle", "VkFoo", "VkFoo* pHandle"),
             ],
         )];
@@ -460,8 +471,16 @@ mod tests {
             "vkCreatePipeline",
             vec![
                 mk_param("device", "VkDevice", "VkDevice device"),
-                mk_param("pCreateInfo", "VkPipelineCreateInfo", "const VkPipelineCreateInfo* p"),
-                mk_param("pAllocator", "VkAllocationCallbacks", "const VkAllocationCallbacks* a"),
+                mk_param(
+                    "pCreateInfo",
+                    "VkPipelineCreateInfo",
+                    "const VkPipelineCreateInfo* p",
+                ),
+                mk_param(
+                    "pAllocator",
+                    "VkAllocationCallbacks",
+                    "const VkAllocationCallbacks* a",
+                ),
                 p,
             ],
         )];
@@ -476,8 +495,16 @@ mod tests {
             "vkCreateFooKHR",
             vec![
                 mk_param("device", "VkDevice", "VkDevice device"),
-                mk_param("pCreateInfo", "VkFooCreateInfoKHR", "const VkFooCreateInfoKHR* pCreateInfo"),
-                mk_param("pAllocator", "VkAllocationCallbacks", "const VkAllocationCallbacks* pAllocator"),
+                mk_param(
+                    "pCreateInfo",
+                    "VkFooCreateInfoKHR",
+                    "const VkFooCreateInfoKHR* pCreateInfo",
+                ),
+                mk_param(
+                    "pAllocator",
+                    "VkAllocationCallbacks",
+                    "const VkAllocationCallbacks* pAllocator",
+                ),
                 mk_param("pFoo", "VkFooKHR", "VkFooKHR* pFoo"),
             ],
         );
@@ -486,7 +513,11 @@ mod tests {
             vec![
                 mk_param("device", "VkDevice", "VkDevice device"),
                 mk_param("foo", "VkFooKHR", "VkFooKHR foo"),
-                mk_param("pAllocator", "VkAllocationCallbacks", "const VkAllocationCallbacks* pAllocator"),
+                mk_param(
+                    "pAllocator",
+                    "VkAllocationCallbacks",
+                    "const VkAllocationCallbacks* pAllocator",
+                ),
             ],
         );
         let cand = Candidate {
@@ -504,5 +535,4 @@ mod tests {
         assert!(code.contains("unsafe impl Send for FooKHR"));
         assert!(code.contains("unsafe impl Sync for FooKHR"));
     }
-
 }

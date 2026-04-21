@@ -135,7 +135,10 @@ impl InstanceExtensions {
 // Generated per-extension enable methods. See
 // `vulkan_gen::codegen::generator_modules::extensions_builder_gen`.
 include!(concat!(env!("OUT_DIR"), "/device_extensions_generated.rs"));
-include!(concat!(env!("OUT_DIR"), "/instance_extensions_generated.rs"));
+include!(concat!(
+    env!("OUT_DIR"),
+    "/instance_extensions_generated.rs"
+));
 
 #[cfg(test)]
 mod tests {

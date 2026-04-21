@@ -36,6 +36,7 @@
 //! ```
 
 use super::device::DeviceInner;
+use super::pnext::PNextChain;
 use super::{Device, DeviceMemory, Error, Result, check};
 use crate::raw::bindings::*;
 use std::sync::Arc;
@@ -109,6 +110,42 @@ pub struct Buffer {
 impl Buffer {
     /// Create a new buffer with the given size and usage.
     pub fn new(device: &Device, info: BufferCreateInfo) -> Result<Self> {
+        Self::new_with_pnext(device, info, None)
+    }
+
+    /// Create a new buffer, optionally attaching an extension `pNext` chain
+    /// to `VkBufferCreateInfo`.
+    ///
+    /// Typical uses:
+    ///
+    /// - `VkExternalMemoryBufferCreateInfo` — declare a buffer as compatible
+    ///   with external-memory handle types (required before binding memory
+    ///   allocated with `VkExportMemoryAllocateInfo`).
+    /// - `VkBufferOpaqueCaptureAddressCreateInfo` — capture-replay support
+    ///   for buffer-device-address workflows.
+    /// - `VkBufferUsageFlags2CreateInfo` — extended usage flags beyond the
+    ///   core 32-bit mask.
+    ///
+    /// ```ignore
+    /// use vulkane::raw::bindings::*;
+    /// use vulkane::raw::PNextChainable;
+    /// use vulkane::safe::{Buffer, BufferCreateInfo, BufferUsage, PNextChain};
+    ///
+    /// let mut chain = PNextChain::new();
+    /// let mut ext = VkExternalMemoryBufferCreateInfo::new_pnext();
+    /// ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT as u32;
+    /// chain.push(ext);
+    /// let buf = Buffer::new_with_pnext(
+    ///     &device,
+    ///     BufferCreateInfo { size: 4096, usage: BufferUsage::STORAGE_BUFFER },
+    ///     Some(&chain),
+    /// )?;
+    /// ```
+    pub fn new_with_pnext(
+        device: &Device,
+        info: BufferCreateInfo,
+        pnext: Option<&PNextChain>,
+    ) -> Result<Self> {
         let create = device
             .inner
             .dispatch
@@ -117,6 +154,7 @@ impl Buffer {
 
         let create_info = VkBufferCreateInfo {
             sType: VkStructureType::STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            pNext: pnext.map_or(std::ptr::null(), |c| c.head()),
             size: info.size,
             usage: info.usage.0,
             sharingMode: VkSharingMode::SHARING_MODE_EXCLUSIVE,
@@ -124,7 +162,9 @@ impl Buffer {
         };
 
         let mut handle: VkBuffer = 0;
-        // Safety: create_info is valid for the call, device is valid.
+        // Safety: create_info is valid for the call, device is valid. The
+        // optional pNext chain is borrowed through `pnext` and lives for the
+        // duration of this synchronous call.
         check(unsafe {
             create(
                 device.inner.handle,

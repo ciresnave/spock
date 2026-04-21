@@ -207,10 +207,7 @@ mod tests {
             .with_buffer_device_address();
         // features2 head + one VkPhysicalDeviceVulkan12Features.
         assert_eq!(f.chain().len(), 2);
-        let v12 = f
-            .chain()
-            .get::<VkPhysicalDeviceVulkan12Features>()
-            .unwrap();
+        let v12 = f.chain().get::<VkPhysicalDeviceVulkan12Features>().unwrap();
         assert_eq!(v12.timelineSemaphore, 1);
         assert_eq!(v12.bufferDeviceAddress, 1);
     }
@@ -222,8 +219,16 @@ mod tests {
             .with_timeline_semaphore() // 1.2 -> push v12
             .with_synchronization2(); // 1.3 -> push v13
         assert_eq!(f.chain().len(), 3);
-        assert!(f.chain().get::<VkPhysicalDeviceVulkan12Features>().is_some());
-        assert!(f.chain().get::<VkPhysicalDeviceVulkan13Features>().is_some());
+        assert!(
+            f.chain()
+                .get::<VkPhysicalDeviceVulkan12Features>()
+                .is_some()
+        );
+        assert!(
+            f.chain()
+                .get::<VkPhysicalDeviceVulkan13Features>()
+                .is_some()
+        );
     }
 
     #[test]

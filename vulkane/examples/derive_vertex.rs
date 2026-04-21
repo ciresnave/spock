@@ -21,16 +21,16 @@ fn main() {
 }
 
 #[cfg(feature = "derive")]
+use vulkane::Vertex;
+#[cfg(feature = "derive")]
 use vulkane::safe::{
     AccessFlags, ApiVersion, AttachmentDescription, AttachmentLoadOp, AttachmentStoreOp, Buffer,
     BufferCreateInfo, BufferImageCopy, BufferUsage, ClearValue, CommandPool, DeviceCreateInfo,
     Fence, Format, Framebuffer, GraphicsPipelineBuilder, GraphicsShaderStage, Image,
-    Image2dCreateInfo, ImageLayout, ImageUsage, Instance, InstanceCreateInfo,
-    MemoryPropertyFlags, PipelineLayout, PipelineStage, QueueCreateInfo, QueueFlags, RenderPass,
-    RenderPassCreateInfo, ShaderModule,
+    Image2dCreateInfo, ImageLayout, ImageUsage, Instance, InstanceCreateInfo, MemoryPropertyFlags,
+    PipelineLayout, PipelineStage, QueueCreateInfo, QueueFlags, RenderPass, RenderPassCreateInfo,
+    ShaderModule,
 };
-#[cfg(feature = "derive")]
-use vulkane::Vertex;
 
 #[cfg(feature = "derive")]
 const W: u32 = 256;
@@ -59,9 +59,8 @@ struct InstanceData {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let spv_path = format!("{manifest_dir}/examples/shaders/instanced_mesh.wgsl.spv");
-    let spv_bytes = std::fs::read(&spv_path).map_err(|e| {
-        format!("could not read {spv_path}: {e} (run compile_shader first)")
-    })?;
+    let spv_bytes = std::fs::read(&spv_path)
+        .map_err(|e| format!("could not read {spv_path}: {e} (run compile_shader first)"))?;
 
     let instance = Instance::new(InstanceCreateInfo {
         application_name: Some("vulkane derive_vertex"),
@@ -84,9 +83,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Vertex data — same triangle as instanced_mesh.
     let vertices = [
-        MeshVertex { position: [0.0, -0.3, 0.0] },
-        MeshVertex { position: [0.3, 0.3, 0.0] },
-        MeshVertex { position: [-0.3, 0.3, 0.0] },
+        MeshVertex {
+            position: [0.0, -0.3, 0.0],
+        },
+        MeshVertex {
+            position: [0.3, 0.3, 0.0],
+        },
+        MeshVertex {
+            position: [-0.3, 0.3, 0.0],
+        },
     ];
 
     // Instance offsets — 10x10 grid.
@@ -99,10 +104,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let (vert_buf, _vert_mem) =
-        queue.upload_buffer(&device, &physical, qf, &vertices, BufferUsage::VERTEX_BUFFER)?;
-    let (inst_buf, _inst_mem) =
-        queue.upload_buffer(&device, &physical, qf, &instances, BufferUsage::VERTEX_BUFFER)?;
+    let (vert_buf, _vert_mem) = queue.upload_buffer(
+        &device,
+        &physical,
+        qf,
+        &vertices,
+        BufferUsage::VERTEX_BUFFER,
+    )?;
+    let (inst_buf, _inst_mem) = queue.upload_buffer(
+        &device,
+        &physical,
+        qf,
+        &instances,
+        BufferUsage::VERTEX_BUFFER,
+    )?;
 
     // Look: the vertex layout is derived automatically!
     let bindings = [MeshVertex::binding(0), InstanceData::instance_binding(1)];
@@ -121,27 +136,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         bindings.len(),
         all_attrs.len()
     );
-    println!("     MeshVertex: stride={}, 1 attribute", bindings[0].stride);
-    println!("     InstanceData: stride={}, 1 attribute (instance rate)", bindings[1].stride);
+    println!(
+        "     MeshVertex: stride={}, 1 attribute",
+        bindings[0].stride
+    );
+    println!(
+        "     InstanceData: stride={}, 1 attribute (instance rate)",
+        bindings[1].stride
+    );
 
     // Render setup — abbreviated since the infrastructure is proven.
     let (color_img, _color_mem, color_view) = Image::new_2d_bound(
-        &device, &physical,
+        &device,
+        &physical,
         Image2dCreateInfo {
-            format: Format::R8G8B8A8_UNORM, width: W, height: H,
+            format: Format::R8G8B8A8_UNORM,
+            width: W,
+            height: H,
             usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_SRC,
         },
         MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
-    let render_pass = RenderPass::new(&device, RenderPassCreateInfo {
-        color_attachments: &[AttachmentDescription {
-            format: Format::R8G8B8A8_UNORM,
-            load_op: AttachmentLoadOp::CLEAR, store_op: AttachmentStoreOp::STORE,
-            initial_layout: ImageLayout::UNDEFINED,
-            final_layout: ImageLayout::TRANSFER_SRC_OPTIMAL,
-        }],
-        depth_attachment: None,
-    })?;
+    let render_pass = RenderPass::new(
+        &device,
+        RenderPassCreateInfo {
+            color_attachments: &[AttachmentDescription {
+                format: Format::R8G8B8A8_UNORM,
+                load_op: AttachmentLoadOp::CLEAR,
+                store_op: AttachmentStoreOp::STORE,
+                initial_layout: ImageLayout::UNDEFINED,
+                final_layout: ImageLayout::TRANSFER_SRC_OPTIMAL,
+            }],
+            depth_attachment: None,
+        },
+    )?;
     let framebuffer = Framebuffer::new(&device, &render_pass, &[&color_view], W, H)?;
 
     let shader = ShaderModule::from_spirv_bytes(&device, &spv_bytes)?;
@@ -155,8 +183,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build(&device)?;
 
     let (readback, mut rb_mem) = Buffer::new_bound(
-        &device, &physical,
-        BufferCreateInfo { size: (W * H * 4) as u64, usage: BufferUsage::TRANSFER_DST },
+        &device,
+        &physical,
+        BufferCreateInfo {
+            size: (W * H * 4) as u64,
+            usage: BufferUsage::TRANSFER_DST,
+        },
         MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
     )?;
 
@@ -164,14 +196,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = cmd_pool.allocate_primary()?;
     {
         let mut rec = cmd.begin()?;
-        rec.begin_render_pass_ext(&render_pass, &framebuffer, &[ClearValue::Color([0.0, 0.0, 0.0, 1.0])]);
+        rec.begin_render_pass_ext(
+            &render_pass,
+            &framebuffer,
+            &[ClearValue::Color([0.0, 0.0, 0.0, 1.0])],
+        );
         rec.bind_graphics_pipeline(&pipeline);
         rec.bind_vertex_buffers(0, &[(&vert_buf, 0)]);
         rec.bind_vertex_buffers(1, &[(&inst_buf, 0)]);
         rec.draw(3, INSTANCE_COUNT, 0, 0);
         rec.end_render_pass();
-        rec.copy_image_to_buffer(&color_img, ImageLayout::TRANSFER_SRC_OPTIMAL, &readback, &[BufferImageCopy::full_2d(W, H)]);
-        rec.memory_barrier(PipelineStage::TRANSFER, PipelineStage::HOST, AccessFlags::TRANSFER_WRITE, AccessFlags::HOST_READ);
+        rec.copy_image_to_buffer(
+            &color_img,
+            ImageLayout::TRANSFER_SRC_OPTIMAL,
+            &readback,
+            &[BufferImageCopy::full_2d(W, H)],
+        );
+        rec.memory_barrier(
+            PipelineStage::TRANSFER,
+            PipelineStage::HOST,
+            AccessFlags::TRANSFER_WRITE,
+            AccessFlags::HOST_READ,
+        );
         rec.end()?;
     }
 
@@ -187,7 +233,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             painted += 1;
         }
     }
-    println!("[OK] {painted} / {} non-black pixels ({:.1}%)", W * H, painted as f32 / (W * H) as f32 * 100.0);
+    println!(
+        "[OK] {painted} / {} non-black pixels ({:.1}%)",
+        W * H,
+        painted as f32 / (W * H) as f32 * 100.0
+    );
     assert!(painted > 1000, "expected significant pixel coverage");
 
     drop(m);

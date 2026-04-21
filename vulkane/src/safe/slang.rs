@@ -180,8 +180,7 @@ impl SlangSession {
             .iter()
             .map(|p| CString::new(*p).expect("search path contains NUL byte"))
             .collect();
-        let search_path_ptrs: Vec<*const i8> =
-            search_paths.iter().map(|s| s.as_ptr()).collect();
+        let search_path_ptrs: Vec<*const i8> = search_paths.iter().map(|s| s.as_ptr()).collect();
 
         let target_desc = slang::TargetDesc::default()
             .format(slang::CompileTarget::Spirv)

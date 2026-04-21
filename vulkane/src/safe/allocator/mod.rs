@@ -617,11 +617,7 @@ impl AllocatorInner {
     /// [`Allocator::free`] (explicitly) and from
     /// [`AllocationInner::Drop`] (implicitly when the last clone goes
     /// out of scope).
-    pub(crate) fn free_allocation_internal(
-        &self,
-        location: &AllocationLocation,
-        alloc_size: u64,
-    ) {
+    pub(crate) fn free_allocation_internal(&self, location: &AllocationLocation, alloc_size: u64) {
         let mut state = self.pools.lock().unwrap();
         match location.kind {
             AllocationKind::DefaultPool {
@@ -1205,8 +1201,7 @@ impl Allocator {
         // would cross. Only do this when the heap index is a real heap
         // and we have a meaningful budget number to compare against.
         if heap_index != u32::MAX && budget != 0 {
-            self.inner
-                .fire_pressure_for_heap(heap_index, Some(size));
+            self.inner.fire_pressure_for_heap(heap_index, Some(size));
         }
 
         FitStatus {
@@ -1739,11 +1734,8 @@ impl Allocator {
         requirements: &MemoryRequirements,
         info: AllocationCreateInfo,
     ) -> Result<Allocation> {
-        let memory = self.raw_allocate_with_mask(
-            requirements.size,
-            memory_type_index,
-            info.device_mask,
-        )?;
+        let memory =
+            self.raw_allocate_with_mask(requirements.size, memory_type_index, info.device_mask)?;
         let mapped_ptr = if info.mapped && self.is_host_visible(memory_type_index) {
             self.raw_map_persistent(memory)?
         } else {

@@ -52,6 +52,29 @@ Vulkane exposes Vulkan through two complementary APIs:
   - **Derive macros** — `#[derive(Vertex)]` auto-generates vertex
     input layouts from `#[repr(C)]` structs (optional `derive`
     feature).
+  - **Extension ergonomics (0.8+)** — curated safe wrappers for
+    **ray tracing** (`AccelerationStructure`, `RayTracingPipeline`,
+    `cmd_trace_rays`), **external memory/semaphore interop**
+    (`DeviceMemory::get_win32_handle` / `get_fd` for CUDA / HIP /
+    DX12 bridging), **timeline semaphores**, **synchronization 2**
+    (`memory_barrier2` / `image_barrier2` / `buffer_barrier2`),
+    **push descriptors**, **dynamic rendering**
+    (`begin_rendering`), **descriptor buffer**,
+    **subgroup size control**, **memory priority**, and
+    **shader integer dot product** properties. Every safe
+    create-info builder now exposes a `pnext` extension point so
+    any unwrapped extension struct can be layered on without
+    dropping to raw.
+  - **Generated ergonomic traits (0.8+)** — alongside the raw
+    per-command `DeviceExt` / `InstanceExt` / `CommandBufferRecordingExt`
+    traits, the build emits a second tier — `DeviceSafeExt`,
+    `InstanceSafeExt`, `PhysicalDeviceSafeExt`, `QueueSafeExt`,
+    `CommandBufferRecordingSafeExt` — with idiomatic signatures
+    (slices for slice-params, `Result<Vec<T>>` for
+    `(count, data)` enumerate pairs, references for input
+    structs, return-by-value for single output params). **545
+    generated ergonomic methods** cover ~70% of the extension
+    surface mechanically.
   - **Raw escape hatch** — `Device::dispatch()` /
     `Instance::dispatch()` expose the full dispatch tables so you
     can drop to raw Vulkan for anything the safe wrapper doesn't
@@ -61,7 +84,7 @@ Vulkane exposes Vulkan through two complementary APIs:
 
 ```toml
 [dependencies]
-vulkane = { version = "0.4", features = ["fetch-spec"] }
+vulkane = { version = "0.8", features = ["fetch-spec"] }
 ```
 
 ```rust

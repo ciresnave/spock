@@ -323,6 +323,100 @@ impl PhysicalDevice {
         })
     }
 
+    /// Query shader integer-dot-product acceleration properties
+    /// (`VK_KHR_shader_integer_dot_product`, core in Vulkan 1.3).
+    ///
+    /// Describes which integer-dot-product SPIR-V ops the device
+    /// accelerates natively. For ML workloads the 8-bit and 4×8-bit
+    /// packed variants are what you typically care about: they map
+    /// directly onto int8-quantized matmul and convolution kernels.
+    ///
+    /// Returns `None` if `vkGetPhysicalDeviceProperties2` is not
+    /// available (Vulkan 1.0 without
+    /// `VK_KHR_get_physical_device_properties2`). The boolean fields
+    /// will be `false` across the board on devices that do not
+    /// implement the extension — a safe all-zeros reading.
+    pub fn shader_integer_dot_product_properties(
+        &self,
+    ) -> Option<ShaderIntegerDotProductProperties> {
+        let get2 = self.instance.dispatch.vkGetPhysicalDeviceProperties2?;
+
+        let mut chain = crate::safe::PNextChain::new();
+        chain.push(VkPhysicalDeviceShaderIntegerDotProductProperties::new_pnext());
+        let mut props2 = VkPhysicalDeviceProperties2 {
+            sType: VkStructureType::STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+            pNext: chain.head_mut(),
+            ..Default::default()
+        };
+        // Safety: handle valid; props2 + chain live for the call.
+        unsafe { get2(self.handle, &mut props2) };
+
+        let raw = chain.get::<VkPhysicalDeviceShaderIntegerDotProductProperties>()?;
+        Some(ShaderIntegerDotProductProperties {
+            dot_product_8bit_unsigned: raw.integerDotProduct8BitUnsignedAccelerated != 0,
+            dot_product_8bit_signed: raw.integerDotProduct8BitSignedAccelerated != 0,
+            dot_product_8bit_mixed: raw.integerDotProduct8BitMixedSignednessAccelerated != 0,
+            dot_product_4x8bit_packed_unsigned: raw
+                .integerDotProduct4x8BitPackedUnsignedAccelerated
+                != 0,
+            dot_product_4x8bit_packed_signed: raw.integerDotProduct4x8BitPackedSignedAccelerated
+                != 0,
+            dot_product_4x8bit_packed_mixed: raw
+                .integerDotProduct4x8BitPackedMixedSignednessAccelerated
+                != 0,
+            dot_product_16bit_unsigned: raw.integerDotProduct16BitUnsignedAccelerated != 0,
+            dot_product_16bit_signed: raw.integerDotProduct16BitSignedAccelerated != 0,
+            dot_product_32bit_unsigned: raw.integerDotProduct32BitUnsignedAccelerated != 0,
+            dot_product_32bit_signed: raw.integerDotProduct32BitSignedAccelerated != 0,
+            dot_product_64bit_unsigned: raw.integerDotProduct64BitUnsignedAccelerated != 0,
+            dot_product_64bit_signed: raw.integerDotProduct64BitSignedAccelerated != 0,
+            dot_product_accumulating_sat_8bit_signed: raw
+                .integerDotProductAccumulatingSaturating8BitSignedAccelerated
+                != 0,
+            dot_product_accumulating_sat_8bit_unsigned: raw
+                .integerDotProductAccumulatingSaturating8BitUnsignedAccelerated
+                != 0,
+            dot_product_accumulating_sat_4x8bit_packed_signed: raw
+                .integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated
+                != 0,
+            dot_product_accumulating_sat_4x8bit_packed_unsigned: raw
+                .integerDotProductAccumulatingSaturating4x8BitPackedUnsignedAccelerated
+                != 0,
+        })
+    }
+
+    /// Query `VK_KHR_ray_tracing_pipeline` runtime properties — SBT
+    /// handle size, alignment, recursion limits.
+    ///
+    /// All are required to lay out a shader binding table correctly.
+    /// Returns `None` if `vkGetPhysicalDeviceProperties2` is not
+    /// available; returns a struct with all-zero values on a driver
+    /// that doesn't implement the extension.
+    pub fn ray_tracing_pipeline_properties(
+        &self,
+    ) -> Option<super::ray_tracing_pipeline::RayTracingPipelineProperties> {
+        let get2 = self.instance.dispatch.vkGetPhysicalDeviceProperties2?;
+        let mut chain = crate::safe::PNextChain::new();
+        chain.push(VkPhysicalDeviceRayTracingPipelinePropertiesKHR::new_pnext());
+        let mut props2 = VkPhysicalDeviceProperties2 {
+            sType: VkStructureType::STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+            pNext: chain.head_mut(),
+            ..Default::default()
+        };
+        // Safety: handle valid; props2 + chain live for the call.
+        unsafe { get2(self.handle, &mut props2) };
+        let raw = chain.get::<VkPhysicalDeviceRayTracingPipelinePropertiesKHR>()?;
+        Some(super::ray_tracing_pipeline::RayTracingPipelineProperties {
+            shader_group_handle_size: raw.shaderGroupHandleSize,
+            max_ray_recursion_depth: raw.maxRayRecursionDepth,
+            max_shader_group_stride: raw.maxShaderGroupStride,
+            shader_group_base_alignment: raw.shaderGroupBaseAlignment,
+            shader_group_handle_alignment: raw.shaderGroupHandleAlignment,
+            max_ray_dispatch_invocation_count: raw.maxRayDispatchInvocationCount,
+            max_ray_hit_attribute_size: raw.maxRayHitAttributeSize,
+        })
+    }
+
     /// The number of nanoseconds per timestamp tick on this device.
     ///
     /// `vkCmdWriteTimestamp` writes a `u64` count of implementation-defined
@@ -569,6 +663,48 @@ pub struct MemoryBudget {
     pub heap_count: u32,
     pub budget: [u64; 16],
     pub usage: [u64; 16],
+}
+
+/// Safe view of
+/// [`VkPhysicalDeviceShaderIntegerDotProductProperties`](crate::raw::bindings::VkPhysicalDeviceShaderIntegerDotProductProperties).
+///
+/// Each field is `true` when the device accelerates that SPIR-V dot-product
+/// variant natively. For ML workloads the 8-bit and 4×8-bit-packed signals
+/// are the high-value ones — they gate whether int8 quantized matmul /
+/// convolution compiles down to hardware SIMD-dot (e.g. DP4a on AMD,
+/// __dp4a on NVIDIA) or a slower fallback.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ShaderIntegerDotProductProperties {
+    pub dot_product_8bit_unsigned: bool,
+    pub dot_product_8bit_signed: bool,
+    pub dot_product_8bit_mixed: bool,
+    pub dot_product_4x8bit_packed_unsigned: bool,
+    pub dot_product_4x8bit_packed_signed: bool,
+    pub dot_product_4x8bit_packed_mixed: bool,
+    pub dot_product_16bit_unsigned: bool,
+    pub dot_product_16bit_signed: bool,
+    pub dot_product_32bit_unsigned: bool,
+    pub dot_product_32bit_signed: bool,
+    pub dot_product_64bit_unsigned: bool,
+    pub dot_product_64bit_signed: bool,
+    pub dot_product_accumulating_sat_8bit_signed: bool,
+    pub dot_product_accumulating_sat_8bit_unsigned: bool,
+    pub dot_product_accumulating_sat_4x8bit_packed_signed: bool,
+    pub dot_product_accumulating_sat_4x8bit_packed_unsigned: bool,
+}
+
+impl ShaderIntegerDotProductProperties {
+    /// `true` if the device accelerates *any* int8 or 4×8-bit-packed
+    /// dot-product variant — the minimum bar for hardware-accelerated
+    /// int8-quantized inference.
+    pub fn has_any_int8_acceleration(&self) -> bool {
+        self.dot_product_8bit_signed
+            || self.dot_product_8bit_unsigned
+            || self.dot_product_8bit_mixed
+            || self.dot_product_4x8bit_packed_signed
+            || self.dot_product_4x8bit_packed_unsigned
+            || self.dot_product_4x8bit_packed_mixed
+    }
 }
 
 impl MemoryBudget {

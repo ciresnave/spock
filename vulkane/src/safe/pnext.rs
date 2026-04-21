@@ -243,11 +243,8 @@ impl PNextChain {
     fn relink(&mut self) {
         // Snapshot raw pointers first so we can write without needing
         // simultaneous mutable borrows into the Vec.
-        let ptrs: Vec<*mut VkBaseOutStructure> = self
-            .nodes
-            .iter_mut()
-            .map(|b| b.as_base_mut_ptr())
-            .collect();
+        let ptrs: Vec<*mut VkBaseOutStructure> =
+            self.nodes.iter_mut().map(|b| b.as_base_mut_ptr()).collect();
         for (i, &p) in ptrs.iter().enumerate() {
             let next = if i + 1 < ptrs.len() {
                 ptrs[i + 1]

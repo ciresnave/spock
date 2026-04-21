@@ -124,6 +124,13 @@ pub struct InstanceCreateInfo<'a> {
     /// effect — if the extension isn't enabled the callback is silently
     /// ignored at instance creation time.
     pub debug_callback: Option<Box<DebugCallback>>,
+    /// Additional extension `pNext` structs to chain onto
+    /// `VkInstanceCreateInfo`. Useful for structs such as
+    /// `VkValidationFeaturesEXT`, `VkLayerSettingsCreateInfoEXT`, or
+    /// `VkDirectDriverLoadingListLUNARG`. The extension must also appear
+    /// in [`enabled_extensions`](Self::enabled_extensions) for the driver
+    /// to recognise the struct.
+    pub pnext: Option<&'a super::pnext::PNextChain>,
 }
 
 impl<'a> Default for InstanceCreateInfo<'a> {
@@ -137,6 +144,7 @@ impl<'a> Default for InstanceCreateInfo<'a> {
             enabled_layers: &[],
             enabled_extensions: None,
             debug_callback: None,
+            pnext: None,
         }
     }
 }
@@ -170,10 +178,7 @@ impl<'a> InstanceCreateInfo<'a> {
 
 impl<'a> std::fmt::Debug for InstanceCreateInfo<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let ext_names: &[&'static str] = self
-            .enabled_extensions
-            .map(|e| e.names())
-            .unwrap_or(&[]);
+        let ext_names: &[&'static str] = self.enabled_extensions.map(|e| e.names()).unwrap_or(&[]);
         f.debug_struct("InstanceCreateInfo")
             .field("application_name", &self.application_name)
             .field("application_version", &self.application_version)
@@ -410,6 +415,7 @@ impl Instance {
 
         let create_info = VkInstanceCreateInfo {
             sType: VkStructureType::STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+            pNext: info.pnext.map_or(std::ptr::null(), |c| c.head()),
             pApplicationInfo: &app_info,
             enabledLayerCount: layer_ptrs.len() as u32,
             ppEnabledLayerNames: if layer_ptrs.is_empty() {

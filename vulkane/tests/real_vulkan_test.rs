@@ -13,9 +13,9 @@
 //! If no Vulkan driver is installed, the test prints a notice and passes
 //! (rather than failing CI on machines without Vulkan).
 
+use std::ffi::CStr;
 use vulkane::raw::bindings::*;
 use vulkane::raw::{VkResultExt, VulkanLibrary};
-use std::ffi::CStr;
 
 #[test]
 fn test_real_vulkan_loader() {

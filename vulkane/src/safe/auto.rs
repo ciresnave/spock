@@ -60,9 +60,34 @@ include!(concat!(env!("OUT_DIR"), "/auto_handles_generated.rs"));
 // command available as a safe method on `Device`.
 include!(concat!(env!("OUT_DIR"), "/auto_device_ext_generated.rs"));
 include!(concat!(env!("OUT_DIR"), "/auto_instance_ext_generated.rs"));
-include!(concat!(env!("OUT_DIR"), "/auto_physical_device_ext_generated.rs"));
+include!(concat!(
+    env!("OUT_DIR"),
+    "/auto_physical_device_ext_generated.rs"
+));
 include!(concat!(env!("OUT_DIR"), "/auto_queue_ext_generated.rs"));
-include!(concat!(env!("OUT_DIR"), "/auto_command_buffer_ext_generated.rs"));
+include!(concat!(
+    env!("OUT_DIR"),
+    "/auto_command_buffer_ext_generated.rs"
+));
+
+// Phase 3 — one *ergonomic* safe-signature trait per dispatch-target
+// handle type, covering every command whose parameter shape matches
+// one of a handful of recognised patterns (scalar args, single input
+// struct by reference, at most one trailing output value). Commands
+// that don't match fall through to the raw Phase-2 ext trait above.
+// Users opt in per trait:
+// `use vulkane::safe::{DeviceSafeExt, CommandBufferRecordingSafeExt};`.
+include!(concat!(env!("OUT_DIR"), "/auto_device_safe_generated.rs"));
+include!(concat!(env!("OUT_DIR"), "/auto_instance_safe_generated.rs"));
+include!(concat!(
+    env!("OUT_DIR"),
+    "/auto_physical_device_safe_generated.rs"
+));
+include!(concat!(env!("OUT_DIR"), "/auto_queue_safe_generated.rs"));
+include!(concat!(
+    env!("OUT_DIR"),
+    "/auto_command_buffer_safe_generated.rs"
+));
 
 #[cfg(test)]
 mod tests {
@@ -149,6 +174,94 @@ mod tests {
                  h: u32,
                  d: u32| {
             r.vk_cmd_trace_rays_khr(raygen, miss, hit, callable, w, h, d);
+        };
+    }
+
+    /// Phase-3 proof: the ergonomic safe traits are importable and
+    /// their methods have the expected signatures. Ergonomic = input
+    /// structs passed by reference, single output values returned by
+    /// value, VkResult returns wrapped in `Result<T>`.
+    #[test]
+    fn ergonomic_safe_traits_provide_clean_signatures() {
+        use super::super::{CommandBufferRecordingSafeExt, DeviceSafeExt};
+
+        // Device: device_wait_idle returns Result<()> — no raw VkResult.
+        let _ = |d: &crate::safe::Device| -> crate::safe::Result<()> { d.device_wait_idle() };
+
+        // CommandBuffer: cmd_begin_rendering takes &VkRenderingInfo by
+        // reference, not *const.
+        let _ = |r: &mut crate::safe::CommandBufferRecording<'_>,
+                 info: &crate::raw::bindings::VkRenderingInfo| {
+            r.cmd_begin_rendering(info);
+        };
+
+        // Device: get_memory_win32_handle_khr — the flagship Tier-1
+        // case. Takes &Info, returns Result<HANDLE> (the output
+        // parameter is returned by value).
+        #[cfg(windows)]
+        let _ = |d: &crate::safe::Device,
+                 info: &crate::raw::bindings::VkMemoryGetWin32HandleInfoKHR|
+         -> crate::safe::Result<crate::raw::bindings::HANDLE> {
+            d.get_memory_win32_handle_khr(info)
+        };
+    }
+
+    /// Shape H (slice coalesce) + Shape I (enumerate → Vec) compile-checks.
+    /// The generator must have emitted `&[T]` inputs with an implicit
+    /// count, and `Result<Vec<T>>` for enumerate pairs.
+    ///
+    /// Some generated methods collide by name with hand-written ones
+    /// (e.g. `Instance::enumerate_physical_devices` returns the *safe*
+    /// `Vec<PhysicalDevice>`). Where the inherent method shadows the
+    /// generated trait method, we use UFCS to prove the trait method
+    /// exists with the generated signature.
+    #[test]
+    fn ergonomic_safe_slice_and_enumerate_signatures() {
+        use super::super::{
+            CommandBufferRecordingSafeExt, DeviceSafeExt, InstanceSafeExt, PhysicalDeviceSafeExt,
+            QueueSafeExt,
+        };
+
+        // Instance: generated enumerate_physical_devices returns raw
+        // VkPhysicalDevice = *mut c_void. Call via UFCS because the
+        // hand-written Instance::enumerate_physical_devices shadows the
+        // trait method and returns Vec<safe::PhysicalDevice>.
+        let _ = |i: &crate::safe::Instance|
+         -> crate::safe::Result<Vec<crate::raw::bindings::VkPhysicalDevice>> {
+            <crate::safe::Instance as InstanceSafeExt>::enumerate_physical_devices(i)
+        };
+
+        // PhysicalDevice: void-return enumerate.
+        let _ = |p: &crate::safe::PhysicalDevice|
+         -> Vec<crate::raw::bindings::VkQueueFamilyProperties> {
+            <crate::safe::PhysicalDevice as PhysicalDeviceSafeExt>::get_physical_device_queue_family_properties(p)
+        };
+
+        // Device: enumerate with an extra scalar argument (the
+        // swapchain) before the (count, data) pair.
+        let _ = |d: &crate::safe::Device,
+                 sc: crate::raw::bindings::VkSwapchainKHR|
+         -> crate::safe::Result<Vec<crate::raw::bindings::VkImage>> {
+            d.get_swapchain_images_khr(sc)
+        };
+
+        // CommandBuffer: three independent slice pairs in one command.
+        let _ = |r: &mut crate::safe::CommandBufferRecording<'_>,
+                 src_stage: crate::raw::bindings::VkPipelineStageFlags,
+                 dst_stage: crate::raw::bindings::VkPipelineStageFlags,
+                 dep: crate::raw::bindings::VkDependencyFlags,
+                 mb: &[crate::raw::bindings::VkMemoryBarrier],
+                 bb: &[crate::raw::bindings::VkBufferMemoryBarrier],
+                 ib: &[crate::raw::bindings::VkImageMemoryBarrier]| {
+            r.cmd_pipeline_barrier(src_stage, dst_stage, dep, mb, bb, ib);
+        };
+
+        // Queue: queue_submit coalesces submitCount + pSubmits.
+        let _ = |q: &crate::safe::Queue,
+                 submits: &[crate::raw::bindings::VkSubmitInfo],
+                 fence: crate::raw::bindings::VkFence|
+         -> crate::safe::Result<()> {
+            <crate::safe::Queue as QueueSafeExt>::queue_submit(q, submits, fence)
         };
     }
 

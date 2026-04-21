@@ -32,6 +32,21 @@ pub struct Fence {
 impl Fence {
     /// Create a new fence in the unsignaled state.
     pub fn new(device: &Device) -> Result<Self> {
+        Self::new_with_pnext(device, None)
+    }
+
+    /// Create a new fence, optionally attaching an extension `pNext` chain
+    /// to `VkFenceCreateInfo`.
+    ///
+    /// Typical uses:
+    ///
+    /// - `VkExportFenceCreateInfo` — mark the fence as exportable to an
+    ///   external handle type (Win32 / FD), used with
+    ///   `VK_KHR_external_fence_{win32,fd}` for CUDA/HIP interop.
+    pub fn new_with_pnext(
+        device: &Device,
+        pnext: Option<&crate::safe::PNextChain>,
+    ) -> Result<Self> {
         let create = device
             .inner
             .dispatch
@@ -40,11 +55,13 @@ impl Fence {
 
         let info = VkFenceCreateInfo {
             sType: VkStructureType::STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            pNext: pnext.map_or(std::ptr::null(), |c| c.head()),
             ..Default::default()
         };
 
         let mut handle: VkFence = 0;
-        // Safety: info is valid for the call, device is valid.
+        // Safety: info is valid for the call, device is valid. The optional
+        // pNext chain is borrowed and outlives the synchronous call.
         check(unsafe { create(device.inner.handle, &info, std::ptr::null(), &mut handle) })?;
 
         Ok(Self {
@@ -129,6 +146,22 @@ pub struct Semaphore {
 impl Semaphore {
     /// Create a new binary semaphore in the unsignaled state.
     pub fn binary(device: &Device) -> Result<Self> {
+        Self::binary_with_pnext(device, None)
+    }
+
+    /// Create a new binary semaphore, optionally attaching an extension
+    /// `pNext` chain to `VkSemaphoreCreateInfo`.
+    ///
+    /// Typical uses:
+    ///
+    /// - `VkExportSemaphoreCreateInfo` — mark the semaphore as exportable
+    ///   to an external handle type. Required before calling
+    ///   [`get_win32_handle`](Self::get_win32_handle) /
+    ///   [`get_fd`](Self::get_fd).
+    pub fn binary_with_pnext(
+        device: &Device,
+        pnext: Option<&crate::safe::PNextChain>,
+    ) -> Result<Self> {
         let create = device
             .inner
             .dispatch
@@ -137,11 +170,13 @@ impl Semaphore {
 
         let info = VkSemaphoreCreateInfo {
             sType: VkStructureType::STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+            pNext: pnext.map_or(std::ptr::null(), |c| c.head()),
             ..Default::default()
         };
 
         let mut handle: VkSemaphore = 0;
-        // Safety: info is valid for the call, device is valid.
+        // Safety: info is valid for the call, device is valid. The optional
+        // pNext chain is borrowed and outlives this synchronous call.
         check(unsafe { create(device.inner.handle, &info, std::ptr::null(), &mut handle) })?;
 
         Ok(Self {
@@ -158,6 +193,24 @@ impl Semaphore {
     /// that timeline semaphores are not available — Vulkan 1.0/1.1 without
     /// `VK_KHR_timeline_semaphore`).
     pub fn timeline(device: &Device, initial_value: u64) -> Result<Self> {
+        Self::timeline_with_pnext(device, initial_value, None)
+    }
+
+    /// Create a new timeline semaphore, additionally attaching an
+    /// extension `pNext` chain to `VkSemaphoreCreateInfo`.
+    ///
+    /// `VkSemaphoreTypeCreateInfo` is always prepended by this method —
+    /// callers should not include it themselves. Typical uses for the
+    /// extra chain:
+    ///
+    /// - `VkExportSemaphoreCreateInfo` — combine timeline semantics with
+    ///   external-handle export, yielding a timeline semaphore usable for
+    ///   CUDA/HIP stream interop.
+    pub fn timeline_with_pnext(
+        device: &Device,
+        initial_value: u64,
+        extra_pnext: Option<&crate::safe::PNextChain>,
+    ) -> Result<Self> {
         // Sanity-check that timeline semaphores are even loadable.
         if device.inner.dispatch.vkGetSemaphoreCounterValue.is_none() {
             return Err(Error::MissingFunction("vkGetSemaphoreCounterValue"));
@@ -175,6 +228,9 @@ impl Semaphore {
             initialValue: initial_value,
             ..Default::default()
         });
+        if let Some(extra) = extra_pnext {
+            chain.append(extra.clone());
+        }
 
         let info = VkSemaphoreCreateInfo {
             sType: VkStructureType::STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,

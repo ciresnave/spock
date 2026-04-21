@@ -35,7 +35,6 @@ const H: u32 = 64;
 const PIXEL_BYTES: u64 = 4;
 const BUF_SIZE: u64 = (W as u64) * (H as u64) * PIXEL_BYTES;
 
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Load the pre-compiled SPIR-V shader.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -170,7 +169,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.image_barrier(
             PipelineStage::TOP_OF_PIPE,
             PipelineStage::TRANSFER,
-            ImageBarrier::color(&image, ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST_OPTIMAL, AccessFlags::NONE, AccessFlags::TRANSFER_WRITE),
+            ImageBarrier::color(
+                &image,
+                ImageLayout::UNDEFINED,
+                ImageLayout::TRANSFER_DST_OPTIMAL,
+                AccessFlags::NONE,
+                AccessFlags::TRANSFER_WRITE,
+            ),
         );
         // Upload pixels.
         rec.copy_buffer_to_image(
@@ -183,7 +188,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.image_barrier(
             PipelineStage::TRANSFER,
             PipelineStage::COMPUTE_SHADER,
-            ImageBarrier::color(&image, ImageLayout::TRANSFER_DST_OPTIMAL, ImageLayout::GENERAL, AccessFlags::TRANSFER_WRITE, AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE),
+            ImageBarrier::color(
+                &image,
+                ImageLayout::TRANSFER_DST_OPTIMAL,
+                ImageLayout::GENERAL,
+                AccessFlags::TRANSFER_WRITE,
+                AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE,
+            ),
         );
 
         // Dispatch the invert shader.
@@ -195,7 +206,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.image_barrier(
             PipelineStage::COMPUTE_SHADER,
             PipelineStage::TRANSFER,
-            ImageBarrier::color(&image, ImageLayout::GENERAL, ImageLayout::TRANSFER_SRC_OPTIMAL, AccessFlags::SHADER_WRITE, AccessFlags::TRANSFER_READ),
+            ImageBarrier::color(
+                &image,
+                ImageLayout::GENERAL,
+                ImageLayout::TRANSFER_SRC_OPTIMAL,
+                AccessFlags::SHADER_WRITE,
+                AccessFlags::TRANSFER_READ,
+            ),
         );
         // Copy back to staging.
         rec.copy_image_to_buffer(
@@ -205,7 +222,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[BufferImageCopy::full_2d(W, H)],
         );
         // Transfer -> Host barrier so the host map sees the bytes.
-        rec.memory_barrier(PipelineStage::TRANSFER, PipelineStage::HOST, AccessFlags::TRANSFER_WRITE, AccessFlags::HOST_READ);
+        rec.memory_barrier(
+            PipelineStage::TRANSFER,
+            PipelineStage::HOST,
+            AccessFlags::TRANSFER_WRITE,
+            AccessFlags::HOST_READ,
+        );
 
         rec.end()?;
     }

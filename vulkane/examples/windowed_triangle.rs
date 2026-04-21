@@ -258,7 +258,10 @@ impl Renderer {
         let cmd = &self.cmd_buffers[image_index as usize];
         self.queue.submit_with_sync(
             &[cmd],
-            &[WaitSemaphore::binary(&frame.image_available, PipelineStage::COLOR_ATTACHMENT_OUTPUT)],
+            &[WaitSemaphore::binary(
+                &frame.image_available,
+                PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+            )],
             &[SignalSemaphore::binary(&frame.render_finished)],
             Some(&frame.in_flight),
         )?;

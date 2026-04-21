@@ -109,7 +109,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 bytes[i * 4 + 2],
                 bytes[i * 4 + 3],
             ]);
-            assert_eq!(got, expected, "element {i} mismatch: got {got}, expected {expected}");
+            assert_eq!(
+                got, expected,
+                "element {i} mismatch: got {got}, expected {expected}"
+            );
         }
     }
     println!("[OK] Read-back verified: all {} elements match", DATA.len());

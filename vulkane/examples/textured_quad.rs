@@ -49,7 +49,6 @@ const TEX_W: u32 = 4;
 const TEX_H: u32 = 4;
 const TEX_BYTES: u64 = (TEX_W as u64) * (TEX_H as u64) * PIXEL_BYTES;
 
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Load multi-entry-point SPIR-V.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -60,7 +59,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
              (run `cargo run -p vulkane --features naga,fetch-spec --example compile_shader`)"
         )
     })?;
-    println!("[OK] Loaded textured_quad SPIR-V ({} bytes)", spv_bytes.len());
+    println!(
+        "[OK] Loaded textured_quad SPIR-V ({} bytes)",
+        spv_bytes.len()
+    );
 
     // 2. Instance + physical + device + queue.
     let instance = match Instance::new(InstanceCreateInfo {
@@ -168,9 +170,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let color_req = color.memory_requirements();
     let color_mt = physical
-        .find_memory_type(color_req.memory_type_bits, MemoryPropertyFlags::DEVICE_LOCAL)
+        .find_memory_type(
+            color_req.memory_type_bits,
+            MemoryPropertyFlags::DEVICE_LOCAL,
+        )
         .or_else(|| {
-            physical.find_memory_type(color_req.memory_type_bits, MemoryPropertyFlags::HOST_VISIBLE)
+            physical.find_memory_type(
+                color_req.memory_type_bits,
+                MemoryPropertyFlags::HOST_VISIBLE,
+            )
         })
         .ok_or("no compatible memory type for color attachment")?;
     let color_mem = DeviceMemory::allocate(&device, color_req.size, color_mt)?;
@@ -266,7 +274,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.image_barrier(
             PipelineStage::TOP_OF_PIPE,
             PipelineStage::TRANSFER,
-            ImageBarrier::color(&texture, ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST_OPTIMAL, AccessFlags::NONE, AccessFlags::TRANSFER_WRITE),
+            ImageBarrier::color(
+                &texture,
+                ImageLayout::UNDEFINED,
+                ImageLayout::TRANSFER_DST_OPTIMAL,
+                AccessFlags::NONE,
+                AccessFlags::TRANSFER_WRITE,
+            ),
         );
         // Upload texture from staging buffer.
         rec.copy_buffer_to_image(
@@ -279,7 +293,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.image_barrier(
             PipelineStage::TRANSFER,
             PipelineStage::FRAGMENT_SHADER,
-            ImageBarrier::color(&texture, ImageLayout::TRANSFER_DST_OPTIMAL, ImageLayout::SHADER_READ_ONLY_OPTIMAL, AccessFlags::TRANSFER_WRITE, AccessFlags::SHADER_READ),
+            ImageBarrier::color(
+                &texture,
+                ImageLayout::TRANSFER_DST_OPTIMAL,
+                ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                AccessFlags::TRANSFER_WRITE,
+                AccessFlags::SHADER_READ,
+            ),
         );
 
         // Begin render pass on the color attachment, draw the textured quad.
@@ -298,7 +318,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[BufferImageCopy::full_2d(W, H)],
         );
         // Transfer -> Host so the host read sees the bytes.
-        rec.memory_barrier(PipelineStage::TRANSFER, PipelineStage::HOST, AccessFlags::TRANSFER_WRITE, AccessFlags::HOST_READ);
+        rec.memory_barrier(
+            PipelineStage::TRANSFER,
+            PipelineStage::HOST,
+            AccessFlags::TRANSFER_WRITE,
+            AccessFlags::HOST_READ,
+        );
 
         rec.end()?;
     }
@@ -348,9 +373,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let total = W * H;
-    println!(
-        "[OK] Pixel tally: {reds} red, {greens} green, {blacks} black (of {total})"
-    );
+    println!("[OK] Pixel tally: {reds} red, {greens} green, {blacks} black (of {total})");
     assert!(
         reds > 100,
         "expected at least 100 red pixels from the checkerboard texture, got {reds}"

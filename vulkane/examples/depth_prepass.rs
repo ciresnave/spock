@@ -17,12 +17,12 @@
 //! Run with: `cargo run -p vulkane --features fetch-spec --example depth_prepass`
 
 use vulkane::safe::{
-    AccessFlags, ApiVersion, AttachmentDescription, AttachmentLoadOp, AttachmentStoreOp,
-    Buffer, BufferCreateInfo, BufferImageCopy, BufferUsage, ClearValue, CommandPool, CompareOp,
+    AccessFlags, ApiVersion, AttachmentDescription, AttachmentLoadOp, AttachmentStoreOp, Buffer,
+    BufferCreateInfo, BufferImageCopy, BufferUsage, ClearValue, CommandPool, CompareOp,
     DeviceCreateInfo, DeviceMemory, Fence, Format, Framebuffer, GraphicsPipelineBuilder,
-    GraphicsShaderStage, Image, Image2dCreateInfo, ImageLayout, ImageUsage,
-    ImageView, Instance, InstanceCreateInfo, MemoryPropertyFlags, PipelineLayout, PipelineStage,
-    QueueCreateInfo, QueueFlags, RenderPass, RenderPassCreateInfo, ShaderModule,
+    GraphicsShaderStage, Image, Image2dCreateInfo, ImageLayout, ImageUsage, ImageView, Instance,
+    InstanceCreateInfo, MemoryPropertyFlags, PipelineLayout, PipelineStage, QueueCreateInfo,
+    QueueFlags, RenderPass, RenderPassCreateInfo, ShaderModule,
 };
 
 const W: u32 = 256;
@@ -31,9 +31,8 @@ const H: u32 = 256;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let spv_path = format!("{manifest_dir}/examples/shaders/depth_prepass.wgsl.spv");
-    let spv_bytes = std::fs::read(&spv_path).map_err(|e| {
-        format!("could not read {spv_path}: {e} (run compile_shader first)")
-    })?;
+    let spv_bytes = std::fs::read(&spv_path)
+        .map_err(|e| format!("could not read {spv_path}: {e} (run compile_shader first)"))?;
 
     let instance = Instance::new(InstanceCreateInfo {
         application_name: Some("vulkane depth_prepass"),
@@ -109,8 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }),
         },
     )?;
-    let framebuffer =
-        Framebuffer::new(&device, &render_pass, &[&color_view, &depth_view], W, H)?;
+    let framebuffer = Framebuffer::new(&device, &render_pass, &[&color_view, &depth_view], W, H)?;
     println!("[OK] Created render pass + framebuffer (color + depth)");
 
     // Two pipelines from the same shader module (multi-entry-point WGSL).

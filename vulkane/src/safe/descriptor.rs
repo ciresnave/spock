@@ -122,6 +122,52 @@ impl DescriptorSetLayout {
     pub fn raw(&self) -> VkDescriptorSetLayout {
         self.handle
     }
+
+    /// Size in bytes of one descriptor set from this layout when used
+    /// via `VK_EXT_descriptor_buffer` (core-adjacent in Vulkan 1.4).
+    ///
+    /// Descriptor buffers trade the `DescriptorPool` + `DescriptorSet`
+    /// lifecycle for a plain `VkBuffer` whose bytes the application
+    /// lays out directly. This query tells you how much space one set
+    /// occupies so you can size the backing buffer.
+    ///
+    /// Returns `Err(MissingFunction(..))` if the device doesn't expose
+    /// the extension.
+    pub fn descriptor_buffer_size(&self) -> Result<u64> {
+        let f = self
+            .device
+            .dispatch
+            .vkGetDescriptorSetLayoutSizeEXT
+            .ok_or(Error::MissingFunction("vkGetDescriptorSetLayoutSizeEXT"))?;
+        let mut size: VkDeviceSize = 0;
+        // Safety: handle valid; output is fully written by the driver.
+        unsafe { f(self.device.handle, self.handle, &mut size) };
+        Ok(size)
+    }
+
+    /// Byte offset of a specific binding within a descriptor set laid
+    /// out as a descriptor buffer.
+    ///
+    /// Combined with [`descriptor_buffer_size`](Self::descriptor_buffer_size)
+    /// this tells you where to write each descriptor's raw bytes via
+    /// `vkGetDescriptorEXT`. Descriptor data is written directly into
+    /// the descriptor buffer's mapped bytes — see the raw
+    /// [`DeviceExt::vk_get_descriptor_ext`](crate::safe::auto::DeviceExt::vk_get_descriptor_ext)
+    /// for the low-level writer path.
+    pub fn descriptor_buffer_binding_offset(&self, binding: u32) -> Result<u64> {
+        let f = self
+            .device
+            .dispatch
+            .vkGetDescriptorSetLayoutBindingOffsetEXT
+            .ok_or(Error::MissingFunction(
+                "vkGetDescriptorSetLayoutBindingOffsetEXT",
+            ))?;
+        let mut offset: VkDeviceSize = 0;
+        // Safety: handle valid; binding index is validated by the driver;
+        // output written on success.
+        unsafe { f(self.device.handle, self.handle, binding, &mut offset) };
+        Ok(offset)
+    }
 }
 
 impl Drop for DescriptorSetLayout {

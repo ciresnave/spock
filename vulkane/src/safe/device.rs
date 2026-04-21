@@ -169,6 +169,18 @@ pub struct DeviceCreateInfo<'a> {
     /// Pass `None` to enable no features — equivalent to
     /// `DeviceFeatures::new()`.
     pub enabled_features: Option<&'a DeviceFeatures>,
+    /// Additional extension `pNext` structs to chain onto `VkDeviceCreateInfo`
+    /// beyond what `enabled_features` and internal machinery already add.
+    ///
+    /// Use this for create-time extension structs that are *not* feature
+    /// bits. For example: `VkDeviceDiagnosticsConfigCreateInfoNV`,
+    /// `VkDevicePrivateDataCreateInfo`, or `VkDeviceMemoryOverallocationCreateInfoAMD`.
+    ///
+    /// Feature-bit extensions (those structured as
+    /// `VkPhysicalDeviceXxxFeatures`) should be toggled through
+    /// [`DeviceFeatures::chain_extension_feature`] instead — they are
+    /// re-routed through the features chain automatically.
+    pub pnext: Option<&'a super::pnext::PNextChain>,
 }
 
 // `&[T]` does implement `Default` (returns an empty slice), so technically
@@ -181,6 +193,7 @@ impl<'a> Default for DeviceCreateInfo<'a> {
             queue_create_infos: &[],
             enabled_extensions: None,
             enabled_features: None,
+            pnext: None,
         }
     }
 }
@@ -340,21 +353,24 @@ impl Device {
             });
         }
 
-        let p_enabled_features: *const VkPhysicalDeviceFeatures = if let Some(features) =
-            info.enabled_features
-        {
-            // Clone the user's chain so repeated calls with the same
-            // `&DeviceFeatures` don't invalidate it. The chain's nodes
-            // are each heap-boxed — cloning means we build a parallel
-            // chain with fresh boxes of the same struct content.
-            //
-            // Using features2 in pNext requires pEnabledFeatures to be
-            // null.
-            chain.append(features.clone_chain_for_device_create());
-            std::ptr::null()
-        } else {
-            std::ptr::null()
-        };
+        let p_enabled_features: *const VkPhysicalDeviceFeatures =
+            if let Some(features) = info.enabled_features {
+                // Clone the user's chain so repeated calls with the same
+                // `&DeviceFeatures` don't invalidate it. The chain's nodes
+                // are each heap-boxed — cloning means we build a parallel
+                // chain with fresh boxes of the same struct content.
+                //
+                // Using features2 in pNext requires pEnabledFeatures to be
+                // null.
+                chain.append(features.clone_chain_for_device_create());
+                std::ptr::null()
+            } else {
+                std::ptr::null()
+            };
+
+        if let Some(user_pnext) = info.pnext {
+            chain.append(user_pnext.clone());
+        }
 
         let final_p_next = chain.head();
 
@@ -606,7 +622,8 @@ impl Queue {
 
         let raw_wait: Vec<VkSemaphore> =
             wait_semaphores.iter().map(|w| w.semaphore.raw()).collect();
-        let raw_wait_stages: Vec<u32> = wait_semaphores.iter().map(|w| w.dst_stage_mask.0).collect();
+        let raw_wait_stages: Vec<u32> =
+            wait_semaphores.iter().map(|w| w.dst_stage_mask.0).collect();
         let raw_wait_values: Vec<u64> = wait_semaphores.iter().map(|w| w.value).collect();
         let raw_wait_device_indices: Vec<u32> =
             wait_semaphores.iter().map(|w| w.device_index).collect();
@@ -616,10 +633,8 @@ impl Queue {
             .map(|s| s.semaphore.raw())
             .collect();
         let raw_signal_values: Vec<u64> = signal_semaphores.iter().map(|s| s.value).collect();
-        let raw_signal_device_indices: Vec<u32> = signal_semaphores
-            .iter()
-            .map(|s| s.device_index)
-            .collect();
+        let raw_signal_device_indices: Vec<u32> =
+            signal_semaphores.iter().map(|s| s.device_index).collect();
 
         // Build the submit-info pNext chain. Each link's pointers
         // reference slices we allocated above (raw_wait_values,
@@ -644,8 +659,8 @@ impl Queue {
                 None => {
                     // Default = "all devices in the group", which on a
                     // single-device group is just 0b1.
-                    let default_mask = (1u32 << self.device.physical_devices.len() as u32)
-                        .wrapping_sub(1);
+                    let default_mask =
+                        (1u32 << self.device.physical_devices.len() as u32).wrapping_sub(1);
                     vec![default_mask; raw_cmds.len()]
                 }
             }
@@ -839,11 +854,7 @@ impl Queue {
 
         // One-shot copy.
         self.one_shot(device, queue_family_index, |rec| {
-            rec.copy_buffer(
-                &staging,
-                &gpu_buf,
-                &[BufferCopy::full(byte_size)],
-            );
+            rec.copy_buffer(&staging, &gpu_buf, &[BufferCopy::full(byte_size)]);
             Ok(())
         })?;
 
@@ -870,13 +881,12 @@ impl Queue {
     ) -> Result<(super::Image, super::DeviceMemory, super::ImageView)> {
         use super::buffer::{Buffer, BufferCreateInfo};
         use super::flags::AccessFlags;
-        use super::image::{
-            BufferImageCopy, Image, Image2dCreateInfo, ImageBarrier, ImageView,
-        };
+        use super::image::{BufferImageCopy, Image, Image2dCreateInfo, ImageBarrier, ImageView};
 
         let byte_size = (width as u64) * (height as u64) * 4;
         assert_eq!(
-            pixels.len() as u64, byte_size,
+            pixels.len() as u64,
+            byte_size,
             "upload_image_rgba: pixels.len() must be width * height * 4"
         );
 
@@ -907,7 +917,10 @@ impl Queue {
         )?;
         let req = image.memory_requirements();
         let type_index = physical
-            .find_memory_type(req.memory_type_bits, super::MemoryPropertyFlags::DEVICE_LOCAL)
+            .find_memory_type(
+                req.memory_type_bits,
+                super::MemoryPropertyFlags::DEVICE_LOCAL,
+            )
             .or_else(|| {
                 physical.find_memory_type(
                     req.memory_type_bits,

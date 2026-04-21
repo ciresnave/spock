@@ -4,17 +4,16 @@
 //! Skips gracefully on systems without Vulkan installed.
 
 use vulkane::safe::{
-    AccessFlags, AccessFlags2, AllocationCreateInfo, AllocationStrategy, AllocationUsage, Allocator,
-    ApiVersion, Buffer, BufferCopy, BufferCreateInfo, BufferImageCopy, BufferUsage, CommandPool,
-    ComputePipeline, DebugMessage, DebugMessageSeverity,
-    DefragmentationMove, DefragmentationPlan, DescriptorPool, DescriptorPoolSize,
-    DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType, DeviceCreateInfo,
-    DeviceFeatures, DeviceMemory, Fence, Format, Image, Image2dCreateInfo, ImageBarrier,
-    ImageLayout, ImageUsage, ImageView, Instance, InstanceCreateInfo, KHRONOS_VALIDATION_LAYER,
-    MemoryPropertyFlags, PipelineCache, PipelineLayout, PipelineStage, PipelineStage2,
-    PipelineStatisticsFlags, PoolCreateInfo, PushConstantRange, QueryPool, QueueCreateInfo,
-    QueueFlags, Semaphore, SemaphoreKind, ShaderModule, ShaderStageFlags, SignalSemaphore,
-    SpecializationConstants, WaitSemaphore,
+    AccessFlags, AccessFlags2, AllocationCreateInfo, AllocationStrategy, AllocationUsage,
+    Allocator, ApiVersion, Buffer, BufferCopy, BufferCreateInfo, BufferImageCopy, BufferUsage,
+    CommandPool, ComputePipeline, DebugMessage, DebugMessageSeverity, DefragmentationMove,
+    DefragmentationPlan, DescriptorPool, DescriptorPoolSize, DescriptorSetLayout,
+    DescriptorSetLayoutBinding, DescriptorType, DeviceCreateInfo, DeviceFeatures, DeviceMemory,
+    Fence, Format, Image, Image2dCreateInfo, ImageBarrier, ImageLayout, ImageUsage, ImageView,
+    Instance, InstanceCreateInfo, KHRONOS_VALIDATION_LAYER, MemoryPropertyFlags, PipelineCache,
+    PipelineLayout, PipelineStage, PipelineStage2, PipelineStatisticsFlags, PoolCreateInfo,
+    PushConstantRange, QueryPool, QueueCreateInfo, QueueFlags, Semaphore, SemaphoreKind,
+    ShaderModule, ShaderStageFlags, SignalSemaphore, SpecializationConstants, WaitSemaphore,
 };
 
 #[test]
@@ -1448,7 +1447,13 @@ fn test_image_buffer_round_trip_via_layout_transitions() {
         rec.image_barrier(
             PipelineStage::TOP_OF_PIPE,
             PipelineStage::TRANSFER,
-            ImageBarrier::color(&image, ImageLayout::UNDEFINED, ImageLayout::TRANSFER_DST_OPTIMAL, AccessFlags::NONE, AccessFlags::TRANSFER_WRITE),
+            ImageBarrier::color(
+                &image,
+                ImageLayout::UNDEFINED,
+                ImageLayout::TRANSFER_DST_OPTIMAL,
+                AccessFlags::NONE,
+                AccessFlags::TRANSFER_WRITE,
+            ),
         );
         // 2) Copy buffer -> image
         rec.copy_buffer_to_image(
@@ -1461,7 +1466,13 @@ fn test_image_buffer_round_trip_via_layout_transitions() {
         rec.image_barrier(
             PipelineStage::TRANSFER,
             PipelineStage::TRANSFER,
-            ImageBarrier::color(&image, ImageLayout::TRANSFER_DST_OPTIMAL, ImageLayout::TRANSFER_SRC_OPTIMAL, AccessFlags::TRANSFER_WRITE, AccessFlags::TRANSFER_READ),
+            ImageBarrier::color(
+                &image,
+                ImageLayout::TRANSFER_DST_OPTIMAL,
+                ImageLayout::TRANSFER_SRC_OPTIMAL,
+                AccessFlags::TRANSFER_WRITE,
+                AccessFlags::TRANSFER_READ,
+            ),
         );
         // 4) Copy image -> buffer
         rec.copy_image_to_buffer(

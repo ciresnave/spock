@@ -94,7 +94,10 @@ impl std::fmt::Display for ShaderLoadError {
         match self {
             Self::NotFound(name) => write!(f, "shader not found: {name}"),
             Self::Io { name, source } => {
-                write!(f, "failed to read shader {name} from override directory: {source}")
+                write!(
+                    f,
+                    "failed to read shader {name} from override directory: {source}"
+                )
             }
             Self::MalformedSpirv { name, byte_len } => write!(
                 f,

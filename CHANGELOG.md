@@ -5,6 +5,51 @@ All notable changes to vulkane will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-04-21
+
+Coverage release: full ray-tracing surface, external-memory / external-semaphore interop, synchronization-2 barriers, push descriptors, dynamic rendering, descriptor-buffer binding, timeline semaphores, subgroup-size control, memory priority, and generator-emitted ergonomic safe signatures for ~545 Vulkan commands. Two latent codegen correctness bugs fixed along the way.
+
+### Added — curated extension wrappers
+
+- **Ray tracing** — `safe::AccelerationStructure` (BLAS/TLAS/Generic, AABB + Triangles + Instances geometry), `safe::RayTracingPipeline` with `ShaderGroup` enum (General/TrianglesHit/ProceduralHit) and `ShaderBindingRegion`, `PhysicalDevice::ray_tracing_pipeline_properties`, `CommandBufferRecording::build_acceleration_structure` / `bind_ray_tracing_pipeline` / `trace_rays`, `Device::acceleration_structure_build_sizes`. Examples: [`ray_tracing_as_build`](vulkane/examples/ray_tracing_as_build.rs) builds a live BLAS + TLAS on the local GPU end-to-end.
+- **External memory / semaphore interop** — `DeviceMemory::get_win32_handle` / `get_fd`, `Semaphore::get_win32_handle` / `get_fd` / `import_win32_handle` / `import_fd`, `Win32Handle` newtype, `SemaphoreImportWin32` / `SemaphoreImportFd`. Unblocks CUDA, HIP, DX12, and DMA-BUF bridging. Example: [`external_memory_export`](vulkane/examples/external_memory_export.rs).
+- **Synchronization 2** — `CommandBufferRecording::memory_barrier2` / `image_barrier2` / `buffer_barrier2` with 64-bit `PipelineStage2` / `AccessFlags2`.
+- **Dynamic rendering** — `CommandBufferRecording::begin_rendering` / `end_rendering` with `RenderingInfo` + `RenderingAttachment`.
+- **Push descriptors** — `CommandBufferRecording::push_descriptor_set` taking a `&[PushDescriptorWrite]` that hides the `VkWriteDescriptorSet` layout.
+- **Descriptor buffer** (`VK_EXT_descriptor_buffer`) — `DescriptorSetLayout::descriptor_buffer_size` / `descriptor_buffer_binding_offset` queries, `CommandBufferRecording::bind_descriptor_buffers` / `set_descriptor_buffer_offsets`.
+- **Timeline semaphores** — `Semaphore::timeline_with_pnext` composes caller-supplied chains with the mandatory `VkSemaphoreTypeCreateInfo`.
+- **Compute pipeline options** — `ComputePipelineOptions` carries `required_subgroup_size` (`VK_EXT_subgroup_size_control`), `specialization`, and `cache` in one bag; `ComputePipeline::with_options` is the general constructor.
+- **Memory priority** — `MemoryAllocateInfo::priority: Option<f32>` auto-chains `VkMemoryPriorityAllocateInfoEXT`.
+- **Shader integer dot product** — `PhysicalDevice::shader_integer_dot_product_properties() -> ShaderIntegerDotProductProperties` with `has_any_int8_acceleration()` helper.
+- **pNext extension points** on every safe create-info builder: `DeviceCreateInfo::pnext`, `InstanceCreateInfo::pnext`, `MemoryAllocateInfo::pnext`, plus new `with_pnext` constructors on `Buffer`, `Image`, `Fence`, and `Semaphore`. Any unwrapped extension struct can now be layered on without dropping to raw.
+
+### Added — generated ergonomic traits (Phase 3)
+
+- `DeviceSafeExt`, `InstanceSafeExt`, `PhysicalDeviceSafeExt`, `QueueSafeExt`, `CommandBufferRecordingSafeExt` — auto-generated per-command methods with idiomatic Rust signatures alongside the raw Phase-2 `DeviceExt` etc. traits. **545 ergonomic methods** emitted from `vk.xml`:
+  - **Slice coalescing** — `(count: u32, const T*)` pairs collapse into `&[T]` inputs. `cmd_pipeline_barrier(..., &[MemoryBarrier], &[BufferMemoryBarrier], &[ImageMemoryBarrier])` is one signature.
+  - **Enumerate** — `(*mut u32 count, *mut T data)` pairs become `Result<Vec<T>>` / `Vec<T>` return types. `enumerate_physical_devices` issues the classic two-call count-then-fill idiom automatically.
+  - **Single-output** — trailing `*mut T` parameters become `Result<T>` returns (`get_memory_win32_handle_khr(info: &…) -> Result<HANDLE>`).
+  - **Reference input structs** — `*const T` parameters become `&T`.
+  - **Scalar return passthrough** — `VkDeviceAddress` / `VkBool32` / typed handles pass through untouched (`get_buffer_device_address(info: &…) -> VkDeviceAddress`).
+  - Commands with unsupported shapes (pointer-to-pointer, parallel slices sharing one count, `len` pointing inside a struct) fall through to the raw Phase-2 traits — no method emitted.
+
+### Fixed — generator correctness
+
+- **Nested C-array layout** — `VkTransformMatrixKHR.matrix[3][4]` was emitted as `[f32; 3]` (12 bytes) instead of `[[f32; 4]; 3]` (48 bytes). Every multi-dimensional `float matrix[a][b]` field in `vk.xml` was silently truncated. Fixed in `struct_gen::map_type_to_rust`; any ray-tracing workload using `VkAccelerationStructureInstanceKHR` was affected.
+- **Transitive extension-dep walker** — `transitive_requires` harvested per-`<require>` `depends` attributes and treated them as extension prerequisites. In `vk.xml` those attributes mark *conditional* enum inclusion (e.g. "expose these extra debug-report enums if the user also enables debug_report"), not dependencies. Enabling `VK_KHR_acceleration_structure` therefore silently tried to enable `VK_EXT_debug_report` (an *instance* extension) at device creation, causing `ERROR_EXTENSION_NOT_PRESENT` on every driver. Fixed to use only the canonical top-level `requires` attribute.
+
+### Breaking
+
+- `DeviceCreateInfo` gained a `pnext: Option<&PNextChain>` field (default `None`). Callers using `..Default::default()` are unaffected; anyone constructing the struct with explicit named fields must add it (or switch to update syntax).
+- `InstanceCreateInfo` gained the same `pnext` field.
+- `MemoryAllocateInfo` gained `pnext` and `priority` fields. Direct struct-literal callers must supply both or use `..Default::default()` — the struct now derives `Default`.
+- `CommandBufferRecording::memory_barrier2` / `image_barrier2` / `buffer_barrier2` return `Result<()>` (Sync2 function pointers may be absent on pre-1.3 devices without `VK_KHR_synchronization2`). Previously no sync2 methods existed, so this is only new-code exposure.
+- `ComputePipeline::with_specialization_and_cache` is retained as a shim; new callers should prefer `ComputePipeline::with_options`.
+
+### Test + example coverage
+
+- 249 total workspace tests pass. 10 new generator pattern-matcher unit tests. 5 new live-device tests exercising generated ergonomic traits against a real driver. 2 new example programs that **run live** against the local GPU — `external_memory_export` exports a real Win32 HANDLE, `ray_tracing_as_build` builds a real BLAS + TLAS on the RT hardware.
+
 ## [0.7.0] — 2026-04-19
 
 Allocator-side VRAM observability: the `Allocator` can now surface the driver's per-heap budget numbers in one call, fire budget-pressure callbacks when usage crosses a configurable threshold, and predictively check whether a prospective allocation would exceed the budget — all without requiring the user to opt into `VK_EXT_memory_budget` manually.

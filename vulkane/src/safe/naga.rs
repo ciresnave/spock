@@ -119,8 +119,7 @@ pub fn compile_glsl(source: &str, stage: ShaderStage) -> Result<Vec<u32>, NagaEr
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn compile_wgsl(source: &str) -> Result<Vec<u32>, NagaError> {
-    let module =
-        wgsl::parse_str(source).map_err(|e| NagaError::Parse(e.emit_to_string(source)))?;
+    let module = wgsl::parse_str(source).map_err(|e| NagaError::Parse(e.emit_to_string(source)))?;
     spirv_from_module(module)
 }
 

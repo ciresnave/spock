@@ -344,6 +344,34 @@ pub struct ComputePipeline {
     pub(crate) device: Arc<DeviceInner>,
 }
 
+/// Optional knobs for [`ComputePipeline::with_options`].
+///
+/// Unlike the flat-argument constructors, this struct carries all
+/// extension-layer configuration in a single place, so adding support
+/// for a new extension doesn't require another `with_*` variant.
+#[derive(Clone, Copy, Default)]
+pub struct ComputePipelineOptions<'a> {
+    /// Specialization constants baked in at create time. `None` =
+    /// empty (equivalent to [`ComputePipeline::new`]).
+    pub specialization: Option<&'a SpecializationConstants>,
+    /// Pipeline cache to warm-start from. `None` = no cache.
+    pub cache: Option<&'a PipelineCache>,
+    /// Required subgroup size for the compute stage — `VK_EXT_subgroup_size_control`
+    /// (core in Vulkan 1.3).
+    ///
+    /// ML kernels tuned for a specific subgroup width (wave 32 on NVIDIA,
+    /// wave 64 on AMD CDNA, etc.) can pin the shader to their preferred
+    /// size rather than accepting the driver's default. Must be one of
+    /// the supported sizes reported by
+    /// `VkPhysicalDeviceSubgroupSizeControlProperties.minSubgroupSize /
+    /// maxSubgroupSize`, and the device must have the
+    /// `computeFullSubgroups` feature enabled if the shader's local
+    /// size isn't a multiple of the required size.
+    ///
+    /// `None` leaves the choice to the driver.
+    pub required_subgroup_size: Option<u32>,
+}
+
 impl ComputePipeline {
     /// Create a compute pipeline from a shader module and pipeline layout
     /// with no specialization constants.
@@ -355,12 +383,12 @@ impl ComputePipeline {
         shader: &ShaderModule,
         entry_point: &str,
     ) -> Result<Self> {
-        Self::with_specialization(
+        Self::with_options(
             device,
             layout,
             shader,
             entry_point,
-            &SpecializationConstants::new(),
+            ComputePipelineOptions::default(),
         )
     }
 
@@ -375,13 +403,15 @@ impl ComputePipeline {
         entry_point: &str,
         specialization: &SpecializationConstants,
     ) -> Result<Self> {
-        Self::with_specialization_and_cache(
+        Self::with_options(
             device,
             layout,
             shader,
             entry_point,
-            specialization,
-            None,
+            ComputePipelineOptions {
+                specialization: Some(specialization),
+                ..Default::default()
+            },
         )
     }
 
@@ -397,6 +427,32 @@ impl ComputePipeline {
         specialization: &SpecializationConstants,
         cache: Option<&PipelineCache>,
     ) -> Result<Self> {
+        Self::with_options(
+            device,
+            layout,
+            shader,
+            entry_point,
+            ComputePipelineOptions {
+                specialization: Some(specialization),
+                cache,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Most general compute-pipeline constructor, taking a
+    /// [`ComputePipelineOptions`] bag for extension-layer knobs.
+    ///
+    /// All other constructors delegate here; it's the right entry point
+    /// when you need `required_subgroup_size` or any future
+    /// options-struct field.
+    pub fn with_options(
+        device: &Device,
+        layout: &PipelineLayout,
+        shader: &ShaderModule,
+        entry_point: &str,
+        options: ComputePipelineOptions<'_>,
+    ) -> Result<Self> {
         let create = device
             .inner
             .dispatch
@@ -407,15 +463,32 @@ impl ComputePipeline {
         let entry_c = CString::new(entry_point)?;
 
         // Build the spec info on the stack so its pointers stay valid.
-        let spec_raw = specialization.as_raw();
-        let p_spec = if specialization.is_empty() {
+        let empty_spec = SpecializationConstants::new();
+        let spec_ref = options.specialization.unwrap_or(&empty_spec);
+        let spec_raw = spec_ref.as_raw();
+        let p_spec = if spec_ref.is_empty() {
             std::ptr::null()
         } else {
             &spec_raw as *const _
         };
 
+        // Optional subgroup-size pNext on the compute stage.
+        // Keep the struct on the stack so its address is stable across
+        // the synchronous vkCreateComputePipelines call.
+        let subgroup_struct = options.required_subgroup_size.map(|size| {
+            VkPipelineShaderStageRequiredSubgroupSizeCreateInfo {
+                sType: VkStructureType::STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO,
+                pNext: std::ptr::null(),
+                requiredSubgroupSize: size,
+            }
+        });
+        let stage_pnext: *const std::ffi::c_void = subgroup_struct
+            .as_ref()
+            .map_or(std::ptr::null(), |s| s as *const _ as *const _);
+
         let stage = VkPipelineShaderStageCreateInfo {
             sType: VkStructureType::STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            pNext: stage_pnext,
             stage: 0x20, // VK_SHADER_STAGE_COMPUTE_BIT
             module: shader.handle,
             pName: entry_c.as_ptr(),
@@ -430,11 +503,12 @@ impl ComputePipeline {
             ..Default::default()
         };
 
-        let cache_handle = cache.map_or(0u64, |c| c.handle);
+        let cache_handle = options.cache.map_or(0u64, |c| c.handle);
 
         let mut handle: VkPipeline = 0;
-        // Safety: info, stage, entry_c, spec_raw, and the data inside
-        // `specialization` all live for the duration of this call.
+        // Safety: info, stage, entry_c, spec_raw, subgroup_struct, and
+        // the data inside `spec_ref` all live for the duration of this
+        // synchronous call.
         check(unsafe {
             create(
                 device.inner.handle,

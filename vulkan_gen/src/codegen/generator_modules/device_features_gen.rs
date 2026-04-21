@@ -143,9 +143,7 @@ fn is_feature_struct(
     known_structure_types.contains(stype)
 }
 
-fn load_known_structure_types(
-    intermediate_dir: &Path,
-) -> std::collections::HashSet<String> {
+fn load_known_structure_types(intermediate_dir: &Path) -> std::collections::HashSet<String> {
     let mut set = std::collections::HashSet::new();
     let enums_path = intermediate_dir.join("enums.json");
     let Ok(content) = fs::read_to_string(&enums_path) else {

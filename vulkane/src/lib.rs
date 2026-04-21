@@ -11,8 +11,52 @@
 //!
 //! ```toml
 //! [dependencies]
-//! vulkane = { version = "0.4", features = ["fetch-spec"] }
+//! vulkane = { version = "0.8", features = ["fetch-spec"] }
 //! ```
+//!
+//! # What's new in 0.8
+//!
+//! - **Ray tracing**:
+//!   [`AccelerationStructure`](safe::AccelerationStructure),
+//!   [`RayTracingPipeline`](safe::RayTracingPipeline),
+//!   [`CommandBufferRecording::build_acceleration_structure`](safe::CommandBufferRecording::build_acceleration_structure)
+//!   and
+//!   [`CommandBufferRecording::trace_rays`](safe::CommandBufferRecording::trace_rays).
+//! - **External memory / semaphore interop**:
+//!   [`DeviceMemory::get_win32_handle`](safe::DeviceMemory::get_win32_handle) /
+//!   [`::get_fd`](safe::DeviceMemory::get_fd) and the corresponding
+//!   [`Semaphore`](safe::Semaphore) methods for CUDA / HIP / DX12
+//!   bridging.
+//! - **pNext extension points** on every safe create-info builder
+//!   ([`DeviceCreateInfo::pnext`](safe::DeviceCreateInfo#structfield.pnext),
+//!   [`InstanceCreateInfo::pnext`](safe::InstanceCreateInfo#structfield.pnext),
+//!   [`MemoryAllocateInfo`](safe::MemoryAllocateInfo), and the
+//!   `Buffer::new_with_pnext` / `Image::new_2d_with_pnext` / sync
+//!   `*_with_pnext` constructors).
+//! - **Synchronization 2** command surface:
+//!   [`memory_barrier2`](safe::CommandBufferRecording::memory_barrier2),
+//!   [`image_barrier2`](safe::CommandBufferRecording::image_barrier2),
+//!   [`buffer_barrier2`](safe::CommandBufferRecording::buffer_barrier2).
+//! - **Push descriptors**
+//!   ([`CommandBufferRecording::push_descriptor_set`](safe::CommandBufferRecording::push_descriptor_set))
+//!   and **dynamic rendering**
+//!   ([`begin_rendering`](safe::CommandBufferRecording::begin_rendering) /
+//!   [`end_rendering`](safe::CommandBufferRecording::end_rendering)).
+//! - **Generated ergonomic traits** — import
+//!   [`DeviceSafeExt`](safe::DeviceSafeExt),
+//!   [`InstanceSafeExt`](safe::InstanceSafeExt),
+//!   [`PhysicalDeviceSafeExt`](safe::PhysicalDeviceSafeExt),
+//!   [`QueueSafeExt`](safe::QueueSafeExt), or
+//!   [`CommandBufferRecordingSafeExt`](safe::CommandBufferRecordingSafeExt)
+//!   to reach ~545 Vulkan commands with idiomatic Rust signatures
+//!   (slices, `Result<Vec<T>>`, references) — a mechanical
+//!   complement to the hand-curated wrappers.
+//! - **Breaking change**: direct struct-literal callers of
+//!   [`DeviceCreateInfo`](safe::DeviceCreateInfo),
+//!   [`InstanceCreateInfo`](safe::InstanceCreateInfo), or
+//!   [`MemoryAllocateInfo`](safe::MemoryAllocateInfo) without
+//!   `..Default::default()` must add it — these structs gained
+//!   `pnext` (and `priority` on memory) fields.
 //!
 //! ## Step 1: Create an instance and find a GPU
 //!

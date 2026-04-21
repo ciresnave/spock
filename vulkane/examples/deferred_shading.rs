@@ -18,10 +18,9 @@ use vulkane::safe::{
     BufferCreateInfo, BufferImageCopy, BufferUsage, ClearValue, CommandPool, DescriptorPool,
     DescriptorPoolSize, DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType,
     DeviceCreateInfo, Fence, Format, Framebuffer, GraphicsPipelineBuilder, GraphicsShaderStage,
-    Image, Image2dCreateInfo, ImageLayout, ImageUsage, Instance,
-    InstanceCreateInfo, MemoryPropertyFlags, PipelineLayout, PipelineStage, QueueCreateInfo,
-    QueueFlags, RenderPass, RenderPassCreateInfo, Sampler, SamplerCreateInfo, ShaderModule,
-    ShaderStageFlags,
+    Image, Image2dCreateInfo, ImageLayout, ImageUsage, Instance, InstanceCreateInfo,
+    MemoryPropertyFlags, PipelineLayout, PipelineStage, QueueCreateInfo, QueueFlags, RenderPass,
+    RenderPassCreateInfo, Sampler, SamplerCreateInfo, ShaderModule, ShaderStageFlags,
 };
 
 const W: u32 = 256;
@@ -31,9 +30,8 @@ const VERTEX_COUNT: u32 = 9; // 6 ground + 3 triangle
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let spv_path = format!("{manifest_dir}/examples/shaders/deferred_shading.wgsl.spv");
-    let spv_bytes = std::fs::read(&spv_path).map_err(|e| {
-        format!("could not read {spv_path}: {e} (run compile_shader first)")
-    })?;
+    let spv_bytes = std::fs::read(&spv_path)
+        .map_err(|e| format!("could not read {spv_path}: {e} (run compile_shader first)"))?;
 
     let instance = Instance::new(InstanceCreateInfo {
         application_name: Some("vulkane deferred_shading"),
@@ -61,28 +59,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gbuf_format = Format::R16G16B16A16_SFLOAT;
 
     let (_g_pos_img, _g_pos_mem, g_pos_view) = Image::new_2d_bound(
-        &device, &physical,
+        &device,
+        &physical,
         Image2dCreateInfo {
             format: gbuf_format,
-            width: W, height: H,
+            width: W,
+            height: H,
             usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::SAMPLED,
         },
         MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
     let (_g_norm_img, _g_norm_mem, g_norm_view) = Image::new_2d_bound(
-        &device, &physical,
+        &device,
+        &physical,
         Image2dCreateInfo {
             format: gbuf_format,
-            width: W, height: H,
+            width: W,
+            height: H,
             usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::SAMPLED,
         },
         MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
     let (_g_albedo_img, _g_albedo_mem, g_albedo_view) = Image::new_2d_bound(
-        &device, &physical,
+        &device,
+        &physical,
         Image2dCreateInfo {
             format: Format::R8G8B8A8_UNORM,
-            width: W, height: H,
+            width: W,
+            height: H,
             usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::SAMPLED,
         },
         MemoryPropertyFlags::DEVICE_LOCAL,
@@ -91,10 +95,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Final color output.
     let (final_img, _final_mem, final_view) = Image::new_2d_bound(
-        &device, &physical,
+        &device,
+        &physical,
         Image2dCreateInfo {
             format: Format::R8G8B8A8_UNORM,
-            width: W, height: H,
+            width: W,
+            height: H,
             usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_SRC,
         },
         MemoryPropertyFlags::DEVICE_LOCAL,
@@ -135,7 +141,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &device,
         &gbuf_rp,
         &[&g_pos_view, &g_norm_view, &g_albedo_view],
-        W, H,
+        W,
+        H,
     )?;
 
     // Lighting pass: 1 color attachment.
@@ -201,8 +208,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &device,
         1,
         &[
-            DescriptorPoolSize { descriptor_type: DescriptorType::SAMPLED_IMAGE, descriptor_count: 3 },
-            DescriptorPoolSize { descriptor_type: DescriptorType::SAMPLER, descriptor_count: 1 },
+            DescriptorPoolSize {
+                descriptor_type: DescriptorType::SAMPLED_IMAGE,
+                descriptor_count: 3,
+            },
+            DescriptorPoolSize {
+                descriptor_type: DescriptorType::SAMPLER,
+                descriptor_count: 1,
+            },
         ],
     )?;
     let desc_set = desc_pool.allocate(&light_set_layout)?;
@@ -215,8 +228,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Readback.
     let (readback, mut rb_mem) = Buffer::new_bound(
-        &device, &physical,
-        BufferCreateInfo { size: (W * H * 4) as u64, usage: BufferUsage::TRANSFER_DST },
+        &device,
+        &physical,
+        BufferCreateInfo {
+            size: (W * H * 4) as u64,
+            usage: BufferUsage::TRANSFER_DST,
+        },
         MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
     )?;
 

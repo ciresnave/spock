@@ -10,13 +10,12 @@
 //! Run with: `cargo run -p vulkane --features fetch-spec --example instanced_mesh`
 
 use vulkane::safe::{
-    AccessFlags, ApiVersion, Buffer, BufferCreateInfo, BufferImageCopy, BufferUsage, ClearValue,
-    CommandPool, DeviceCreateInfo, Fence, Format, Framebuffer, GraphicsPipelineBuilder,
-    GraphicsShaderStage, Image, Image2dCreateInfo, ImageLayout, ImageUsage, InputRate,
-    Instance, InstanceCreateInfo, MemoryPropertyFlags, PipelineLayout, PipelineStage,
-    QueueCreateInfo, QueueFlags, RenderPass, RenderPassCreateInfo, ShaderModule,
-    AttachmentDescription, AttachmentLoadOp, AttachmentStoreOp, VertexInputBinding,
-    VertexInputAttribute,
+    AccessFlags, ApiVersion, AttachmentDescription, AttachmentLoadOp, AttachmentStoreOp, Buffer,
+    BufferCreateInfo, BufferImageCopy, BufferUsage, ClearValue, CommandPool, DeviceCreateInfo,
+    Fence, Format, Framebuffer, GraphicsPipelineBuilder, GraphicsShaderStage, Image,
+    Image2dCreateInfo, ImageLayout, ImageUsage, InputRate, Instance, InstanceCreateInfo,
+    MemoryPropertyFlags, PipelineLayout, PipelineStage, QueueCreateInfo, QueueFlags, RenderPass,
+    RenderPassCreateInfo, ShaderModule, VertexInputAttribute, VertexInputBinding,
 };
 
 const W: u32 = 256;
@@ -26,9 +25,8 @@ const INSTANCE_COUNT: u32 = 100;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let spv_path = format!("{manifest_dir}/examples/shaders/instanced_mesh.wgsl.spv");
-    let spv_bytes = std::fs::read(&spv_path).map_err(|e| {
-        format!("could not read {spv_path}: {e} (run compile_shader first)")
-    })?;
+    let spv_bytes = std::fs::read(&spv_path)
+        .map_err(|e| format!("could not read {spv_path}: {e} (run compile_shader first)"))?;
 
     let instance = Instance::new(InstanceCreateInfo {
         application_name: Some("vulkane instanced_mesh"),
@@ -50,11 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let queue = device.get_queue(qf, 0);
 
     // Generate a simple triangle (3 vertices, position only = vec3<f32>).
-    let vertices: Vec<[f32; 3]> = vec![
-        [0.0, -0.3, 0.0],
-        [0.3, 0.3, 0.0],
-        [-0.3, 0.3, 0.0],
-    ];
+    let vertices: Vec<[f32; 3]> = vec![[0.0, -0.3, 0.0], [0.3, 0.3, 0.0], [-0.3, 0.3, 0.0]];
 
     // Generate 100 instance offsets on a 10x10 grid.
     let mut offsets: Vec<[f32; 3]> = Vec::with_capacity(INSTANCE_COUNT as usize);
@@ -74,14 +68,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &vertices,
         BufferUsage::VERTEX_BUFFER,
     )?;
-    let (inst_buf, _inst_mem) = queue.upload_buffer(
-        &device,
-        &physical,
-        qf,
-        &offsets,
-        BufferUsage::VERTEX_BUFFER,
-    )?;
-    println!("[OK] Uploaded {} vertex + {} instance entries", vertices.len(), offsets.len());
+    let (inst_buf, _inst_mem) =
+        queue.upload_buffer(&device, &physical, qf, &offsets, BufferUsage::VERTEX_BUFFER)?;
+    println!(
+        "[OK] Uploaded {} vertex + {} instance entries",
+        vertices.len(),
+        offsets.len()
+    );
 
     // Color attachment.
     let (color_img, _color_mem, color_view) = Image::new_2d_bound(
@@ -208,7 +201,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             painted += 1;
         }
     }
-    println!("[OK] {painted} / {} non-black pixels ({:.1}%)", W * H, painted as f32 / (W * H) as f32 * 100.0);
+    println!(
+        "[OK] {painted} / {} non-black pixels ({:.1}%)",
+        W * H,
+        painted as f32 / (W * H) as f32 * 100.0
+    );
     assert!(
         painted > 1000,
         "expected significant pixel coverage from 100 instanced triangles"

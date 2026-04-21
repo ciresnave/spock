@@ -113,10 +113,8 @@ impl Format {
             | VkFormat::FORMAT_R32G32_SINT
             | VkFormat::FORMAT_R32G32_SFLOAT
             | VkFormat::FORMAT_D32_SFLOAT_S8_UINT => Some(8),
-            VkFormat::FORMAT_R32G32B32_UINT
-            | VkFormat::FORMAT_R32G32B32_SFLOAT => Some(12),
-            VkFormat::FORMAT_R32G32B32A32_UINT
-            | VkFormat::FORMAT_R32G32B32A32_SFLOAT => Some(16),
+            VkFormat::FORMAT_R32G32B32_UINT | VkFormat::FORMAT_R32G32B32_SFLOAT => Some(12),
+            VkFormat::FORMAT_R32G32B32A32_UINT | VkFormat::FORMAT_R32G32B32A32_SFLOAT => Some(16),
             _ => None,
         }
     }
@@ -199,6 +197,25 @@ impl Image {
     /// array layers = 1, sample count = 1, initial layout = UNDEFINED.
     /// These defaults are sufficient for compute storage images.
     pub fn new_2d(device: &Device, info: Image2dCreateInfo) -> Result<Self> {
+        Self::new_2d_with_pnext(device, info, None)
+    }
+
+    /// Create a new 2D image, optionally attaching an extension `pNext`
+    /// chain to `VkImageCreateInfo`. Same defaults as [`new_2d`](Self::new_2d).
+    ///
+    /// Typical uses:
+    ///
+    /// - `VkExternalMemoryImageCreateInfo` — declare an image as compatible
+    ///   with external-memory handle types (DX12/CUDA/HIP interop).
+    /// - `VkImageFormatListCreateInfo` — supply the mutable-format view-format
+    ///   list up-front.
+    /// - `VkImageCompressionControlEXT` — fine-grained image compression
+    ///   control.
+    pub fn new_2d_with_pnext(
+        device: &Device,
+        info: Image2dCreateInfo,
+        pnext: Option<&super::pnext::PNextChain>,
+    ) -> Result<Self> {
         let create = device
             .inner
             .dispatch
@@ -207,6 +224,7 @@ impl Image {
 
         let create_info = VkImageCreateInfo {
             sType: VkStructureType::STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            pNext: pnext.map_or(std::ptr::null(), |c| c.head()),
             imageType: VkImageType::IMAGE_TYPE_2D,
             format: info.format.0,
             extent: VkExtent3D {
@@ -225,7 +243,9 @@ impl Image {
         };
 
         let mut handle: VkImage = 0;
-        // Safety: create_info is valid for the call, device is valid.
+        // Safety: create_info is valid for the call, device is valid. The
+        // optional pNext chain is borrowed through `pnext` and lives for the
+        // duration of this synchronous call.
         check(unsafe {
             create(
                 device.inner.handle,

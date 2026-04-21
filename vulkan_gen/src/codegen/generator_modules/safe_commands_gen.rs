@@ -386,10 +386,7 @@ fn unique_commands(commands: &[VulkanCommand]) -> Vec<&VulkanCommand> {
         .collect()
 }
 
-fn emit_file(
-    target: Target,
-    cmds: &[&VulkanCommand],
-) -> (String, usize) {
+fn emit_file(target: Target, cmds: &[&VulkanCommand]) -> (String, usize) {
     let trait_name = target.trait_name();
     let impl_target = target.impl_target();
 
@@ -478,10 +475,7 @@ pub fn generate_safe_commands(
                 continue;
             }
         };
-        by_target
-            .entry(target.trait_name())
-            .or_default()
-            .push(cmd);
+        by_target.entry(target.trait_name()).or_default().push(cmd);
     }
 
     fs::create_dir_all(output_dir).map_err(GeneratorError::Io)?;
@@ -602,7 +596,9 @@ mod tests {
 
     #[test]
     fn create_destroy_are_skipped() {
-        assert!(is_phase1_handled_command("vkCreateAccelerationStructureKHR"));
+        assert!(is_phase1_handled_command(
+            "vkCreateAccelerationStructureKHR"
+        ));
         assert!(is_phase1_handled_command("vkDestroyBuffer"));
         assert!(is_phase1_handled_command("vkAllocateCommandBuffers"));
         assert!(is_phase1_handled_command("vkFreeDescriptorSets"));
@@ -616,7 +612,11 @@ mod tests {
             "vkCmdDraw",
             "void",
             vec![
-                mk_param("commandBuffer", "VkCommandBuffer", "VkCommandBuffer commandBuffer"),
+                mk_param(
+                    "commandBuffer",
+                    "VkCommandBuffer",
+                    "VkCommandBuffer commandBuffer",
+                ),
                 mk_param("vertexCount", "uint32_t", "uint32_t vertexCount"),
                 mk_param("instanceCount", "uint32_t", "uint32_t instanceCount"),
                 mk_param("firstVertex", "uint32_t", "uint32_t firstVertex"),
@@ -654,11 +654,21 @@ mod tests {
             vec![
                 mk_param("device", "VkDevice", "VkDevice device"),
                 mk_param("thing", "VkSomething", "VkSomething thing"),
-                mk_param("pAllocator", "VkAllocationCallbacks", "const VkAllocationCallbacks* pAllocator"),
+                mk_param(
+                    "pAllocator",
+                    "VkAllocationCallbacks",
+                    "const VkAllocationCallbacks* pAllocator",
+                ),
             ],
         );
         let (sig, body) = emit_method(&cmd, Target::Device).expect("emitted");
-        assert!(!sig.contains("pAllocator"), "pAllocator hidden from signature");
-        assert!(body.contains("std::ptr::null()"), "pAllocator passed as null");
+        assert!(
+            !sig.contains("pAllocator"),
+            "pAllocator hidden from signature"
+        );
+        assert!(
+            body.contains("std::ptr::null()"),
+            "pAllocator passed as null"
+        );
     }
 }

@@ -61,6 +61,7 @@
 
 use crate::raw::bindings::VkResult;
 
+mod acceleration_structure;
 mod allocator;
 pub mod auto;
 mod buffer;
@@ -69,36 +70,52 @@ mod debug;
 mod descriptor;
 pub(crate) mod device;
 mod extensions;
+mod external_memory;
+mod external_semaphore;
 mod features;
+mod flags;
 mod graphics_pipeline;
 mod image;
-mod flags;
 mod instance;
 mod memory;
 #[cfg(feature = "naga")]
 pub mod naga;
-#[cfg(feature = "shaderc")]
-pub mod shaderc;
-#[cfg(feature = "slang")]
-pub mod slang;
 mod physical;
 mod pipeline;
 pub mod pnext;
 mod query;
+mod ray_tracing_pipeline;
 mod render_pass;
 mod shader;
+#[cfg(feature = "shaderc")]
+pub mod shaderc;
 mod shaders;
+#[cfg(feature = "slang")]
+pub mod slang;
 mod surface;
 mod swapchain;
 mod sync;
 
+pub use acceleration_structure::{
+    AccelerationStructure, AccelerationStructureBuildFlags, AccelerationStructureBuildMode,
+    AccelerationStructureBuildType, AccelerationStructureCreateInfo, AccelerationStructureGeometry,
+    AccelerationStructureType, BuildRange, BuildSizes,
+};
 pub use allocator::{
     Allocation, AllocationCreateInfo, AllocationStatistics, AllocationStrategy, AllocationUsage,
     Allocator, DefragmentationMove, DefragmentationPlan, FitStatus, PoolCreateInfo, PoolHandle,
     PressureCallbackId, PressureEvent, PressureKind,
 };
+pub use auto::{
+    CommandBufferRecordingExt, CommandBufferRecordingSafeExt, DeviceExt, DeviceSafeExt,
+    InstanceExt, InstanceSafeExt, PhysicalDeviceExt, PhysicalDeviceSafeExt, QueueExt, QueueSafeExt,
+};
 pub use buffer::{Buffer, BufferCreateInfo, BufferUsage, MemoryRequirements};
-pub use command::{BufferCopy, ClearValue, CommandBuffer, CommandBufferRecording, CommandPool};
+pub use command::{
+    BufferCopy, ClearValue, CommandBuffer, CommandBufferRecording, CommandPool,
+    DescriptorBufferBinding, PipelineBindPoint, PushDescriptorWrite, RenderingAttachment,
+    RenderingInfo,
+};
 pub use debug::{
     DebugCallback, DebugMessage, DebugMessageSeverity, DebugMessageType, default_callback,
 };
@@ -109,16 +126,18 @@ pub use descriptor::{
 pub use device::{
     Device, DeviceCreateInfo, Queue, QueueCreateInfo, SignalSemaphore, WaitSemaphore,
 };
-pub use auto::{
-    CommandBufferRecordingExt, DeviceExt, InstanceExt, PhysicalDeviceExt, QueueExt,
-};
 pub use extensions::{DeviceExtensions, InstanceExtensions};
+#[cfg(windows)]
+pub use external_memory::Win32Handle;
+#[cfg(unix)]
+pub use external_semaphore::SemaphoreImportFd;
+#[cfg(windows)]
+pub use external_semaphore::SemaphoreImportWin32;
 pub use features::DeviceFeatures;
 pub use flags::{AccessFlags, AccessFlags2, PipelineStage, PipelineStage2};
 pub use graphics_pipeline::{
-    CompareOp, CullMode, FrontFace, GraphicsPipeline, GraphicsPipelineBuilder,
-    GraphicsShaderStage, InputRate, PolygonMode, PrimitiveTopology, VertexInputAttribute,
-    VertexInputBinding,
+    CompareOp, CullMode, FrontFace, GraphicsPipeline, GraphicsPipelineBuilder, GraphicsShaderStage,
+    InputRate, PolygonMode, PrimitiveTopology, VertexInputAttribute, VertexInputBinding,
 };
 pub use image::{
     BufferImageCopy, Format, Image, Image2dCreateInfo, ImageBarrier, ImageLayout, ImageUsage,
@@ -128,17 +147,22 @@ pub use instance::{
     ApiVersion, ExtensionProperties, Instance, InstanceCreateInfo, KHRONOS_VALIDATION_LAYER,
     LayerProperties,
 };
-pub use memory::{DeviceMemory, MappedMemory, MemoryPropertyFlags};
+pub use memory::{DeviceMemory, MappedMemory, MemoryAllocateInfo, MemoryPropertyFlags};
 pub use physical::{
     CooperativeMatrixProperties, MemoryBudget, MemoryHeap, MemoryHeapFlags, MemoryType,
     PhysicalDevice, PhysicalDeviceGroup, PhysicalDeviceProperties, PhysicalDeviceType,
-    QueueFamilyProperties, QueueFlags,
+    QueueFamilyProperties, QueueFlags, ShaderIntegerDotProductProperties,
 };
 pub use pipeline::{
-    ComputePipeline, PipelineCache, PipelineLayout, PushConstantRange, SpecializationConstants,
+    ComputePipeline, ComputePipelineOptions, PipelineCache, PipelineLayout, PushConstantRange,
+    SpecializationConstants,
 };
 pub use pnext::PNextChain;
 pub use query::{PipelineStatisticsFlags, QueryPool, QueryType};
+pub use ray_tracing_pipeline::{
+    RayTracingPipeline, RayTracingPipelineProperties, RayTracingShaderStage, RayTracingStage,
+    ShaderBindingRegion, ShaderGroup,
+};
 pub use render_pass::{
     AttachmentDescription, AttachmentLoadOp, AttachmentStoreOp, Framebuffer, RenderPass,
     RenderPassCreateInfo,

@@ -70,10 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Verify it matches what the safe wrapper returns.
     let safe_name = physical.properties().device_name().to_string();
-    assert_eq!(
-        name, &safe_name,
-        "raw and safe device names should match"
-    );
+    assert_eq!(name, &safe_name, "raw and safe device names should match");
     println!("[OK] Raw name matches safe wrapper: {safe_name}");
 
     // 3. Escape hatch on the device side: call vkGetDeviceQueue

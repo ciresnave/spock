@@ -172,7 +172,9 @@ impl StructGenerator {
         //   - structs whose sType lives in a disabled API variant
         //     (e.g. Vulkan SC), so the emitted impl never references a
         //     variant that isn't in the generated `VkStructureType`.
-        if let Some(impl_code) = self.try_emit_pnext_chainable_impl(struct_def, known_structure_types) {
+        if let Some(impl_code) =
+            self.try_emit_pnext_chainable_impl(struct_def, known_structure_types)
+        {
             code.push_str(&impl_code);
         }
 
@@ -285,21 +287,28 @@ impl StructGenerator {
         }
     }
 
-    /// Map Vulkan types to Rust types with proper array handling
+    /// Map Vulkan types to Rust types with proper array handling.
+    ///
+    /// `array_dims` is the list of array dimensions in C-declaration
+    /// order (outermost first). For a C declaration `float matrix[3][4]`
+    /// the dims are `["3", "4"]` and the resulting Rust type is
+    /// `[[f32; 4]; 3]` — preserving C's row-major layout.
     fn map_type_to_rust(
         &self,
         vulkan_type: &str,
         const_qualified: bool,
         pointer_level: usize,
-        is_array: bool,
-        array_size: &Option<String>,
+        array_dims: &[String],
     ) -> String {
-        // Handle arrays first
-        if is_array && pointer_level == 0 {
-            if let Some(size) = array_size {
-                let base_type = self.map_base_vulkan_to_rust(vulkan_type);
-                return format!("[{}; {}]", base_type, size);
+        // Handle arrays first — nest innermost-to-outermost so the
+        // outermost C dimension ends up as the outermost Rust array.
+        if !array_dims.is_empty() && pointer_level == 0 {
+            let base_type = self.map_base_vulkan_to_rust(vulkan_type);
+            let mut result = base_type;
+            for dim in array_dims.iter().rev() {
+                result = format!("[{}; {}]", result, dim);
             }
+            return result;
         }
 
         // Handle pointers
@@ -357,6 +366,9 @@ impl StructGenerator {
 
     /// Parse a struct member definition to produce the full Rust type.
     /// Handles pointers, const, and arrays from the C definition string.
+    ///
+    /// Multi-dimensional arrays are supported: `float matrix[3][4]` →
+    /// `[[f32; 4]; 3]` (preserving C row-major layout).
     fn map_member_type(&self, member: &crate::parser::vk_types::StructMember) -> String {
         let def = member.definition.trim();
         let _base = self.map_base_vulkan_to_rust(&member.type_name);
@@ -367,29 +379,36 @@ impl StructGenerator {
         // Check const qualification
         let const_qualified = def.starts_with("const") || def.contains("const ");
 
-        // Check for array: look for [SOMETHING] in the definition
-        let array_size = if let Some(bracket_start) = def.find('[') {
-            if let Some(bracket_end) = def[bracket_start..].find(']') {
-                let size_str = def[bracket_start + 1..bracket_start + bracket_end].trim();
-                // If the size is a named constant (not a number), append `as usize`
-                if !size_str.is_empty() && !size_str.chars().next().unwrap().is_ascii_digit() {
-                    Some(format!("{} as usize", size_str))
+        // Collect every `[N]` group from the declaration in order.
+        // C allows `T name[a][b]` which means "array of `a` elements,
+        // each an array of `b`"; we keep the dimensions in declaration
+        // order and let `map_type_to_rust` nest them correctly.
+        let mut array_dims: Vec<String> = Vec::new();
+        let mut rest = def;
+        while let Some(start) = rest.find('[') {
+            if let Some(end) = rest[start..].find(']') {
+                let size_str = rest[start + 1..start + end].trim();
+                let dim = if !size_str.is_empty()
+                    && !size_str.chars().next().unwrap().is_ascii_digit()
+                {
+                    format!("{} as usize", size_str)
                 } else {
-                    Some(size_str.to_string())
+                    size_str.to_string()
+                };
+                if !dim.is_empty() {
+                    array_dims.push(dim);
                 }
+                rest = &rest[start + end + 1..];
             } else {
-                None
+                break;
             }
-        } else {
-            None
-        };
+        }
 
         self.map_type_to_rust(
             &member.type_name,
             const_qualified,
             pointer_level,
-            array_size.is_some(),
-            &array_size,
+            &array_dims,
         )
     }
 
@@ -651,44 +670,64 @@ mod tests {
         let generator = StructGenerator::new();
 
         assert_eq!(
-            generator.map_type_to_rust("uint32_t", false, 0, false, &None),
+            generator.map_type_to_rust("uint32_t", false, 0, &[]),
             "u32"
         );
         assert_eq!(
-            generator.map_type_to_rust("uint32_t", true, 1, false, &None),
+            generator.map_type_to_rust("uint32_t", true, 1, &[]),
             "*const u32"
         );
         assert_eq!(
-            generator.map_type_to_rust("uint32_t", false, 1, false, &None),
+            generator.map_type_to_rust("uint32_t", false, 1, &[]),
             "*mut u32"
         );
         assert_eq!(
-            generator.map_type_to_rust("void", true, 1, false, &None),
+            generator.map_type_to_rust("void", true, 1, &[]),
             "*const c_void"
         );
         assert_eq!(
-            generator.map_type_to_rust("VkDevice", false, 0, false, &None),
+            generator.map_type_to_rust("VkDevice", false, 0, &[]),
             "VkDevice"
         );
 
         // Test multiple pointer levels
         assert_eq!(
-            generator.map_type_to_rust("char", true, 2, false, &None),
+            generator.map_type_to_rust("char", true, 2, &[]),
             "*const *mut c_char"
         );
         assert_eq!(
-            generator.map_type_to_rust("void", false, 3, false, &None),
+            generator.map_type_to_rust("void", false, 3, &[]),
             "*mut *mut *mut c_void"
         );
 
-        // Test arrays
+        // 1-D array
         assert_eq!(
-            generator.map_type_to_rust("char", false, 0, true, &Some("256".to_string())),
+            generator.map_type_to_rust("char", false, 0, &["256".to_string()]),
             "[c_char; 256]"
+        );
+        // 2-D array — matches VkTransformMatrixKHR's `float matrix[3][4]`.
+        // Outermost C dimension = 3 stays outer in Rust, giving rows of 4.
+        assert_eq!(
+            generator.map_type_to_rust("float", false, 0, &["3".to_string(), "4".to_string()]),
+            "[[f32; 4]; 3]"
+        );
+        // 3-D array — rare but must nest consistently.
+        assert_eq!(
+            generator.map_type_to_rust(
+                "uint32_t",
+                false,
+                0,
+                &["2".to_string(), "3".to_string(), "4".to_string()],
+            ),
+            "[[[u32; 4]; 3]; 2]"
         );
     }
 
-    fn mk_member(name: &str, type_name: &str, values: Option<&str>) -> crate::parser::vk_types::StructMember {
+    fn mk_member(
+        name: &str,
+        type_name: &str,
+        values: Option<&str>,
+    ) -> crate::parser::vk_types::StructMember {
         crate::parser::vk_types::StructMember {
             name: name.to_string(),
             type_name: type_name.to_string(),
@@ -710,7 +749,10 @@ mod tests {
         }
     }
 
-    fn mk_struct(name: &str, members: Vec<crate::parser::vk_types::StructMember>) -> StructDefinition {
+    fn mk_struct(
+        name: &str,
+        members: Vec<crate::parser::vk_types::StructMember>,
+    ) -> StructDefinition {
         StructDefinition {
             name: name.to_string(),
             category: "struct".to_string(),
@@ -738,15 +780,25 @@ mod tests {
         let s = mk_struct(
             "VkPhysicalDeviceFooFeaturesKHR",
             vec![
-                mk_member("sType", "VkStructureType", Some("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FOO_FEATURES_KHR")),
+                mk_member(
+                    "sType",
+                    "VkStructureType",
+                    Some("VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FOO_FEATURES_KHR"),
+                ),
                 mk_member("pNext", "void", None),
                 mk_member("foo", "VkBool32", None),
             ],
         );
         let known = known_stypes(&["VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FOO_FEATURES_KHR"]);
-        let impl_code = g.try_emit_pnext_chainable_impl(&s, &known).expect("should emit impl");
-        assert!(impl_code.contains("unsafe impl super::pnext::PNextChainable for VkPhysicalDeviceFooFeaturesKHR"));
-        assert!(impl_code.contains("VkStructureType::STRUCTURE_TYPE_PHYSICAL_DEVICE_FOO_FEATURES_KHR"));
+        let impl_code = g
+            .try_emit_pnext_chainable_impl(&s, &known)
+            .expect("should emit impl");
+        assert!(impl_code.contains(
+            "unsafe impl super::pnext::PNextChainable for VkPhysicalDeviceFooFeaturesKHR"
+        ));
+        assert!(
+            impl_code.contains("VkStructureType::STRUCTURE_TYPE_PHYSICAL_DEVICE_FOO_FEATURES_KHR")
+        );
     }
 
     #[test]
@@ -759,7 +811,10 @@ mod tests {
                 mk_member("height", "uint32_t", None),
             ],
         );
-        assert!(g.try_emit_pnext_chainable_impl(&s, &known_stypes(&[])).is_none());
+        assert!(
+            g.try_emit_pnext_chainable_impl(&s, &known_stypes(&[]))
+                .is_none()
+        );
     }
 
     #[test]
@@ -772,7 +827,10 @@ mod tests {
                 mk_member("pNext", "void", None),
             ],
         );
-        assert!(g.try_emit_pnext_chainable_impl(&s, &known_stypes(&[])).is_none());
+        assert!(
+            g.try_emit_pnext_chainable_impl(&s, &known_stypes(&[]))
+                .is_none()
+        );
     }
 
     #[test]
@@ -782,7 +840,11 @@ mod tests {
         let mut s = mk_struct(
             "VkWeirdUnion",
             vec![
-                mk_member("sType", "VkStructureType", Some("VK_STRUCTURE_TYPE_APPLICATION_INFO")),
+                mk_member(
+                    "sType",
+                    "VkStructureType",
+                    Some("VK_STRUCTURE_TYPE_APPLICATION_INFO"),
+                ),
                 mk_member("pNext", "void", None),
             ],
         );
@@ -801,12 +863,22 @@ mod tests {
         let s = mk_struct(
             "VkDeviceObjectReservationCreateInfo",
             vec![
-                mk_member("sType", "VkStructureType", Some("VK_STRUCTURE_TYPE_DEVICE_OBJECT_RESERVATION_CREATE_INFO")),
+                mk_member(
+                    "sType",
+                    "VkStructureType",
+                    Some("VK_STRUCTURE_TYPE_DEVICE_OBJECT_RESERVATION_CREATE_INFO"),
+                ),
                 mk_member("pNext", "void", None),
             ],
         );
         // known_stypes does NOT contain the variant.
-        assert!(g.try_emit_pnext_chainable_impl(&s, &known_stypes(&["VK_STRUCTURE_TYPE_APPLICATION_INFO"])).is_none());
+        assert!(
+            g.try_emit_pnext_chainable_impl(
+                &s,
+                &known_stypes(&["VK_STRUCTURE_TYPE_APPLICATION_INFO"])
+            )
+            .is_none()
+        );
     }
 
     #[test]

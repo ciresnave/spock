@@ -94,9 +94,8 @@ fn normalize(v: [f32; 3]) -> [f32; 3] {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let spv_path = format!("{manifest_dir}/examples/shaders/shadow_map.wgsl.spv");
-    let spv_bytes = std::fs::read(&spv_path).map_err(|e| {
-        format!("could not read {spv_path}: {e} (run compile_shader first)")
-    })?;
+    let spv_bytes = std::fs::read(&spv_path)
+        .map_err(|e| format!("could not read {spv_path}: {e} (run compile_shader first)"))?;
 
     let instance = Instance::new(InstanceCreateInfo {
         application_name: Some("vulkane shadow_map"),
@@ -129,28 +128,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Uniform buffers (one for light MVP, one for camera MVP).
     let (light_ubo, mut light_ubo_mem) = Buffer::new_bound(
-        &device, &physical,
-        BufferCreateInfo { size: 64, usage: BufferUsage::UNIFORM_BUFFER },
+        &device,
+        &physical,
+        BufferCreateInfo {
+            size: 64,
+            usage: BufferUsage::UNIFORM_BUFFER,
+        },
         MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
     )?;
     {
         let mut m = light_ubo_mem.map()?;
-        let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(light_mvp.as_ptr() as *const u8, 64)
-        };
+        let bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(light_mvp.as_ptr() as *const u8, 64) };
         m.as_slice_mut()[..64].copy_from_slice(bytes);
     }
 
     let (camera_ubo, mut camera_ubo_mem) = Buffer::new_bound(
-        &device, &physical,
-        BufferCreateInfo { size: 64, usage: BufferUsage::UNIFORM_BUFFER },
+        &device,
+        &physical,
+        BufferCreateInfo {
+            size: 64,
+            usage: BufferUsage::UNIFORM_BUFFER,
+        },
         MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
     )?;
     {
         let mut m = camera_ubo_mem.map()?;
-        let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(camera_mvp.as_ptr() as *const u8, 64)
-        };
+        let bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(camera_mvp.as_ptr() as *const u8, 64) };
         m.as_slice_mut()[..64].copy_from_slice(bytes);
     }
     println!("[OK] Created uniform buffers for light + camera MVPs");
@@ -168,7 +173,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let s_req = shadow_img.memory_requirements();
     let s_mt = physical
         .find_memory_type(s_req.memory_type_bits, MemoryPropertyFlags::DEVICE_LOCAL)
-        .or_else(|| physical.find_memory_type(s_req.memory_type_bits, MemoryPropertyFlags::HOST_VISIBLE))
+        .or_else(|| {
+            physical.find_memory_type(s_req.memory_type_bits, MemoryPropertyFlags::HOST_VISIBLE)
+        })
         .ok_or("no memory for shadow map")?;
     let _shadow_mem = DeviceMemory::allocate(&device, s_req.size, s_mt)?;
     shadow_img.bind_memory(&_shadow_mem, 0)?;
@@ -190,10 +197,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Color output ---
     let (color_img, _color_mem, color_view) = Image::new_2d_bound(
-        &device, &physical,
+        &device,
+        &physical,
         Image2dCreateInfo {
             format: Format::R8G8B8A8_UNORM,
-            width: W, height: H,
+            width: W,
+            height: H,
             usage: ImageUsage::COLOR_ATTACHMENT | ImageUsage::TRANSFER_SRC,
         },
         MemoryPropertyFlags::DEVICE_LOCAL,
@@ -203,14 +212,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &device,
         Image2dCreateInfo {
             format: Format::D32_SFLOAT,
-            width: W, height: H,
+            width: W,
+            height: H,
             usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT,
         },
     )?;
     let md_req = main_depth_img.memory_requirements();
     let md_mt = physical
         .find_memory_type(md_req.memory_type_bits, MemoryPropertyFlags::DEVICE_LOCAL)
-        .or_else(|| physical.find_memory_type(md_req.memory_type_bits, MemoryPropertyFlags::HOST_VISIBLE))
+        .or_else(|| {
+            physical.find_memory_type(md_req.memory_type_bits, MemoryPropertyFlags::HOST_VISIBLE)
+        })
         .ok_or("no memory for main depth")?;
     let _main_depth_mem = DeviceMemory::allocate(&device, md_req.size, md_mt)?;
     main_depth_img.bind_memory(&_main_depth_mem, 0)?;
@@ -231,7 +243,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }),
         },
     )?;
-    let shadow_fb = Framebuffer::new(&device, &shadow_rp, &[&shadow_view], SHADOW_SIZE, SHADOW_SIZE)?;
+    let shadow_fb = Framebuffer::new(
+        &device,
+        &shadow_rp,
+        &[&shadow_view],
+        SHADOW_SIZE,
+        SHADOW_SIZE,
+    )?;
 
     // Main pass: color + depth.
     let main_rp = RenderPass::new(
@@ -290,9 +308,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &device,
         1,
         &[
-            DescriptorPoolSize { descriptor_type: DescriptorType::UNIFORM_BUFFER, descriptor_count: 2 },
-            DescriptorPoolSize { descriptor_type: DescriptorType::SAMPLED_IMAGE, descriptor_count: 1 },
-            DescriptorPoolSize { descriptor_type: DescriptorType::SAMPLER, descriptor_count: 1 },
+            DescriptorPoolSize {
+                descriptor_type: DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: 2,
+            },
+            DescriptorPoolSize {
+                descriptor_type: DescriptorType::SAMPLED_IMAGE,
+                descriptor_count: 1,
+            },
+            DescriptorPoolSize {
+                descriptor_type: DescriptorType::SAMPLER,
+                descriptor_count: 1,
+            },
         ],
     )?;
     let desc_set = desc_pool.allocate(&set_layout)?;
@@ -326,8 +353,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Readback buffer.
     let (readback, mut rb_mem) = Buffer::new_bound(
-        &device, &physical,
-        BufferCreateInfo { size: (W * H * 4) as u64, usage: BufferUsage::TRANSFER_DST },
+        &device,
+        &physical,
+        BufferCreateInfo {
+            size: (W * H * 4) as u64,
+            usage: BufferUsage::TRANSFER_DST,
+        },
         MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
     )?;
 
@@ -341,7 +372,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rec.begin_render_pass_ext(
             &shadow_rp,
             &shadow_fb,
-            &[ClearValue::DepthStencil { depth: 1.0, stencil: 0 }],
+            &[ClearValue::DepthStencil {
+                depth: 1.0,
+                stencil: 0,
+            }],
         );
         rec.bind_graphics_pipeline(&shadow_pipeline);
         rec.bind_graphics_descriptor_sets(&pipeline_layout, 0, &[&desc_set]);
@@ -373,7 +407,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &main_fb,
             &[
                 ClearValue::Color([0.1, 0.1, 0.2, 1.0]),
-                ClearValue::DepthStencil { depth: 1.0, stencil: 0 },
+                ClearValue::DepthStencil {
+                    depth: 1.0,
+                    stencil: 0,
+                },
             ],
         );
         rec.bind_graphics_pipeline(&main_pipeline);
