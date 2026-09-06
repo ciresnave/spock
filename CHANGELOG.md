@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-09-06  (kiss-vulkan-vocab 0.4.1)
+
 ### Fixed — `kiss-vulkan-vocab`'s published grammar described a FOUR-field token
 
 ⚠️ **The module doc is the only artifact describing the `vulkan:` token grammar
