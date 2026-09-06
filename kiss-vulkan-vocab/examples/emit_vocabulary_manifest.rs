@@ -1337,7 +1337,15 @@ const COVERAGE_NOTE: &str = "What this manifest does and does not pin. The \
     requiring of a token producer — the token names a CHOSEN specialization, so \
     one device yields a set of valid tokens rather than one. Also not claimed: \
     currency. This records the vocabulary version its bytes were generated \
-    against, and a stamp proves BINDING, not CURRENCY.";
+    against, and a stamp proves BINDING, not CURRENCY. And one limit the \
+    vectors cannot express at all: `ops_alphabet` and `arith_names` are \
+    THEMSELVES in lexicographic order, so no vector can distinguish sorting by \
+    the declared array index from sorting the spellings as text for those two \
+    fields, and a producer implementing the wrong one passes every vector here. \
+    `component_types` is NOT alphabetical -- `f64` precedes `bf16` -- and is \
+    therefore discriminable, which is why it carries deliberate ordering \
+    vectors and the other two cannot. The rule is the array's own order in all \
+    three cases; this corpus can only PROVE it for the third.";
 
 /// Every `ComponentType` this vocabulary version names, in canonical order.
 ///

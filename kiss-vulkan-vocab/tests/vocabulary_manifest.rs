@@ -1276,3 +1276,77 @@ fn executing_the_stated_sort_rule_reproduces_the_token_order() {
         );
     }
 }
+
+/// The two alphabets that cannot discriminate their own ordering must still
+/// coincide with it — and this fails the day one stops, which is the day a
+/// discriminating vector becomes both possible and necessary.
+///
+/// ⚠️ `ops_alphabet` and `arith_names` are themselves in lexicographic order, so
+/// NO input can distinguish "sort by the declared array's index" from "sort the
+/// spellings as text" for those fields. A producer implementing the wrong rule
+/// passes every vector that could ever be written. `component_types` is not
+/// alphabetical, which is precisely why it is the field that produced two
+/// ordering defects and now carries two deliberate vectors.
+///
+/// ⚠️ That is a third category. An unstated rule is undiscriminated; an
+/// incidentally-witnessed one is fragile; this one is STATED, RIGHT, and
+/// UNFALSIFIABLE — the corpus cannot test it even in principle. It has a
+/// trigger rather than a fragility, and this is the trigger.
+///
+/// Found by a foreign party reproducing the published manifest.
+#[test]
+fn the_alphabets_that_cannot_discriminate_their_own_order_still_coincide() {
+    let text = committed();
+    let array = |k: &str| -> Vec<String> {
+        between(&text, &format!("\"{k}\": ["), "]")
+            .unwrap_or_else(|| panic!("no `{k}` array"))
+            .split(',')
+            .map(|s| s.trim().trim_matches('"').to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+
+    let k = "arith_names";
+    let v = array(k);
+    assert!(v.len() > 3, "`{k}` parsed as {v:?}");
+    let mut sorted = v.clone();
+    sorted.sort();
+    assert_eq!(
+        v, sorted,
+        "`{k}` is no longer in lexicographic order. Until now the declared \
+         order and the text order COINCIDED, so no vector could distinguish \
+         them and a producer sorting spellings passed everything. That is no \
+         longer true: add a vector whose canonical output differs under the \
+         two rules, or a producer implementing the wrong one is now silently \
+         wrong and nothing here will say so."
+    );
+
+    // `ops_alphabet` is a STRING of juxtaposed letters, not an array — the same
+    // property, a different shape, and a helper written for arrays would have
+    // skipped it silently.
+    let ops = between(&text, "\"ops_alphabet\": \"", "\"").expect("ops_alphabet");
+    let mut ops_sorted: Vec<char> = ops.chars().collect();
+    ops_sorted.sort_unstable();
+    assert_eq!(
+        ops.chars().collect::<Vec<_>>(),
+        ops_sorted,
+        "`ops_alphabet` is no longer in letter order. The same warning applies: \
+         until now no vector could tell index order from text order for this \
+         field, and now one must."
+    );
+
+    // ⚠️ Positive control, and it is the whole reason this test can be trusted:
+    // `component_types` must NOT coincide. If every array were sorted the
+    // assertions above would hold for a comparison that never discriminates
+    // anything, and this test would be measuring nothing.
+    let ct = array("component_types");
+    let mut ct_sorted = ct.clone();
+    ct_sorted.sort();
+    assert_ne!(
+        ct, ct_sorted,
+        "`component_types` is now in lexicographic order too, so the comparison \
+         above no longer distinguishes anything and its passing says nothing. \
+         This is the control: one array must disagree with its own text order, \
+         or the check is vacuous."
+    );
+}
