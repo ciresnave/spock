@@ -747,6 +747,19 @@ def self_test():
     # later gate passed on the repaired tree, and CI's --locked MSRV legs failed
     # all four. The gate repaired the exact condition CI checks, then reported
     # success. A red starts an investigation; a green ends one.
+    # ⚠️ The three cases below CALL `report_mutation`, which PRINTS the real
+    # warning banner. That is deliberate -- the first version of that function
+    # crashed with a UnicodeEncodeError the moment it had something to say, and
+    # only exercising the printing branch caught it. But it means a self-test
+    # run emits text identical to a genuine finding, and a reader scanning the
+    # log sees an alarm. Measured on myself after the 0.16.0 release: I read the
+    # drill as a live mutation on the released tree and had to check `git status`
+    # to disprove it.
+    #
+    # So the drill announces itself. A drill that is indistinguishable from an
+    # alarm trains the reader to discount alarms.
+    print("  -- the two banners below are SELF-TEST DRILLS on synthetic input,")
+    print("     not findings about this tree --")
     check("an unchanged tree is not reported as mutated",
           not report_mutation(set(), set()))
     # THE ONE THAT MUST NOT FIRE: running the gates over work in progress is
