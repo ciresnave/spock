@@ -131,9 +131,9 @@ pub const VOCABULARY_VERSION: u32 = 5;
 pub const COOP_DIGEST_THRESHOLD: usize = 512;
 
 /// FNV-1a 64-bit offset basis, pinned so every implementation agrees.
-const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+pub const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 /// FNV-1a 64-bit prime, pinned so every implementation agrees.
-const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+pub const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 /// FNV-1a 64, over `bytes`, emitted as fixed-width lowercase hex by callers.
 ///

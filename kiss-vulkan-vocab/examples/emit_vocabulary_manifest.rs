@@ -125,6 +125,43 @@ fn emit_declarative(o: &mut String) {
     writeln!(o, "    \"unnamed_component_escape\": \"x<n>\",").unwrap();
     writeln!(o, "    \"empty_set_spelling\": \"<prefix>-none\",").unwrap();
     writeln!(o, "    \"digest_marker\": \"fnv1a64-<hex16>\",").unwrap();
+    // ⚠️ The ALGORITHM and its constants, not merely the marker. Baracuda
+    // reproduced all twelve vectors from this manifest and named this the
+    // single strongest gap: "a vector pins the OUTPUT, not the algorithm."
+    // FNV-1 and FNV-1a differ by one letter -- the operands are swapped --
+    // emit different bytes, and BOTH satisfy the `fnv1a64-<hex16>` marker
+    // shape, so a wrong-constant producer fails the digest vectors without
+    // ever learning why. No number of additional vectors closes that.
+    //
+    // Written from the crate constants rather than transcribed, so the
+    // manifest cannot disagree with the digest it describes.
+    writeln!(o, "    \"digest_algorithm\": \"FNV-1a 64-bit\",").unwrap();
+    writeln!(
+        o,
+        "    \"digest_offset_basis\": \"{:#018x}\",",
+        kiss_vulkan_vocab::FNV_OFFSET_BASIS
+    )
+    .unwrap();
+    writeln!(
+        o,
+        "    \"digest_prime\": \"{:#x}\",",
+        kiss_vulkan_vocab::FNV_PRIME
+    )
+    .unwrap();
+    // Both pinned digests happen to have no leading zero nibble, so the vectors
+    // cannot distinguish zero-padded from trimmed hex. Stated rather than sampled.
+    writeln!(
+        o,
+        "    \"digest_hex\": \"lowercase, zero-padded to exactly 16 digits\","
+    )
+    .unwrap();
+    // Every sampled run is equal-width, so `x9` vs `x10` never discriminates
+    // numeric from lexicographic ordering. Stated for the same reason.
+    writeln!(
+        o,
+        "    \"unnamed_component_escape_order\": \"numeric on <n>, not lexicographic\","
+    )
+    .unwrap();
     writeln!(o, "    \"digest_threshold_bytes\": {COOP_DIGEST_THRESHOLD}").unwrap();
     writeln!(o, "  }},").unwrap();
 }
@@ -245,6 +282,31 @@ fn emit_vectors(o: &mut String) {
         "dedup",
         "Duplicate cooperative-vector combinations.",
         &cv_dupes,
+    ));
+
+    // ⚠️ The TRANSPOSE flag, which nothing pinned before.
+    //
+    // `field_spec` describes it -- "five component types plus a transpose flag"
+    // -- and `field_spec` is the half §6.8-0013 calls DOCUMENTATION. All 56
+    // combos across the other vectors carry `transpose: false`, so the half
+    // §6.8-0013 calls the NORMATIVE CONTRACT never showed that it existed.
+    //
+    // Found by baracuda reproducing this manifest from scratch: they emitted all
+    // twelve vectors byte-identically WITHOUT ever producing a `-t` suffix,
+    // because no vector demanded one. Their pass and their blindness had the
+    // same cause, and neither was visible from the score.
+    //
+    // A flag that is usually absent is exactly what a sample omits.
+    v.push(coopvec_vector(
+        "transpose",
+        "A transposing cooperative-vector combination beside a non-transposing one. Pins that `transpose` is spelled as a trailing `-t` rather than as a sixth component type, and that a clear flag costs nothing: the two combos differ ONLY in the flag, so the suffix is the only difference between their spellings.",
+        &[
+            CoopVecCombo {
+                transpose: true,
+                ..combo(1)
+            },
+            combo(1),
+        ],
     ));
 
     // -- the two SET-VALUED scalar fields. Nothing pinned these before: every
