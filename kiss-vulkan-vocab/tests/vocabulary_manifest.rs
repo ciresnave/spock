@@ -423,6 +423,44 @@ fn threshold_vectors_straddle_their_boundary_per_6_8_0016() {
     }
 }
 
+/// The `sufficiency` block, hand-sliced.
+///
+/// Shared by the two tests that read it. This crate has no dependencies,
+/// dev-dependencies included, so there is no JSON parser to reach for -- and
+/// the slicer needs its own positive control for exactly that reason.
+fn sufficiency_block() -> String {
+    let text = std::fs::read_to_string(committed_path()).expect("committed manifest");
+    let start = text
+        .find("\"sufficiency\"")
+        .expect("§6.8-0017: `sufficiency` is absent. A reader MUST reject this.");
+    let block: String = text[start..]
+        .lines()
+        .take_while(|l| !l.trim_start().starts_with("},"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    // Positive control: a slice that captured nothing would satisfy an
+    // absence-based check by having nothing to contradict it.
+    assert!(
+        block.len() > 30 && block.contains('{'),
+        "the sufficiency block did not parse out ({block:?}); the extractor broke \
+         rather than the manifest shrinking"
+    );
+    block
+}
+
+/// One scalar value out of a hand-sliced JSON block, quoted or bare.
+fn block_value(block: &str, key: &str) -> Option<String> {
+    let at = block.find(&format!("\"{key}\": "))? + key.len() + 4;
+    let rest = &block[at..];
+    Some(if let Some(r) = rest.strip_prefix('"') {
+        r[..r.find('"')?].to_owned()
+    } else {
+        rest[..rest.find([',', '\n']).unwrap_or(rest.len())]
+            .trim()
+            .to_owned()
+    })
+}
+
 /// The manifest must satisfy KISS-CLASSIFY-6.8-0017's rejection conditions,
 /// checked here rather than trusted.
 ///
@@ -440,35 +478,8 @@ fn threshold_vectors_straddle_their_boundary_per_6_8_0016() {
 /// Hand-parsed: this crate has no dependencies, dev-dependencies included.
 #[test]
 fn sufficiency_is_declared_per_6_8_0017() {
-    let text = std::fs::read_to_string(committed_path()).expect("committed manifest");
-
-    let start = text
-        .find("\"sufficiency\"")
-        .expect("§6.8-0017: `sufficiency` is absent. A reader MUST reject this.");
-    let block: String = text[start..]
-        .lines()
-        .take_while(|l| !l.trim_start().starts_with("},"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    // Positive control: a slice that captured nothing would satisfy an
-    // absence-based check by having nothing to contradict it.
-    assert!(
-        block.len() > 30 && block.contains('{'),
-        "the sufficiency block did not parse out ({block:?}); the extractor broke \
-         rather than the manifest shrinking"
-    );
-
-    let value = |key: &str| -> Option<String> {
-        let at = block.find(&format!("\"{key}\": "))? + key.len() + 4;
-        let rest = &block[at..];
-        Some(if let Some(r) = rest.strip_prefix('"') {
-            r[..r.find('"')?].to_owned()
-        } else {
-            rest[..rest.find([',', '\n']).unwrap_or(rest.len())]
-                .trim()
-                .to_owned()
-        })
-    };
+    let block = sufficiency_block();
+    let value = |key: &str| block_value(&block, key);
 
     // Arm 1: absent. Stated apart from arm 2 on purpose.
     let status = value("status").expect(
@@ -509,15 +520,7 @@ fn sufficiency_is_declared_per_6_8_0017() {
 /// file. A failure in either should name which of the two went wrong.
 #[test]
 fn the_sufficiency_note_names_the_manifests_own_vector_count() {
-    let text = std::fs::read_to_string(committed_path()).expect("committed manifest");
-    let start = text
-        .find("\"sufficiency\"")
-        .expect("§6.8-0017: `sufficiency` is absent");
-    let block: String = text[start..]
-        .lines()
-        .take_while(|l| !l.trim_start().starts_with("},"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let block = sufficiency_block();
 
     // Arm 4: the note must NAME the vector count this manifest actually carries.
     //
@@ -532,7 +535,7 @@ fn the_sufficiency_note_names_the_manifests_own_vector_count() {
     // a stale `13` satisfies as comfortably as a correct `16` — a gate that
     // cannot fail the defect it is named after. Requiring the true count to
     // APPEAR has no such hole: there is exactly one number that satisfies it.
-    let vectors = text.matches("\"pins\": ").count();
+    let vectors = committed().matches("\"pins\": ").count();
     assert!(
         vectors > 0,
         "positive control: the vector extractor found none, so the check below \
