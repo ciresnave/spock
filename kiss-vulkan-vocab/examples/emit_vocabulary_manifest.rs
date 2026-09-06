@@ -233,7 +233,26 @@ fn emit_declarative(o: &mut String) {
     let refs: Vec<&str> = spellings.iter().map(String::as_str).collect();
     writeln!(o, "    \"component_types\": {},", str_array(&refs)).unwrap();
     writeln!(o, "    \"unnamed_component_escape\": \"x<n>\",").unwrap();
-    writeln!(o, "    \"empty_set_spelling\": \"<prefix>-none\",").unwrap();
+    // ⚠️ A TEMPLATE, and it must stay one.
+    //
+    // This read `<prefix>-none`, which is WRONG against this manifest's own
+    // `prefix` values rather than merely underspecified: `ops` declares
+    // prefix `ops-` and `coop` declares `cm-`, so `<prefix>` + `-none`
+    // composes to `ops--none` and `cm--none` -- a double dash, for four of
+    // the five fields, while the tokens spell `ops-none` and `cm-none`.
+    //
+    // ⚠️ The first repair replaced it with a correct SENTENCE, and the drill
+    // caught that: restoring the defect left the gate GREEN, because prose
+    // cannot be composed and the test had quietly hardcoded the rule instead
+    // of following the stated one. A machine-checkable value that is wrong
+    // is a bug; an unfalsifiable value that is right is a worse bug, because
+    // the next wrong one arrives with nothing able to say so.
+    //
+    // Every prefix that can spell the empty set already carries its own
+    // trailing `-`, so the separator belongs in the PREFIX, not in this rule.
+    // `declarative.notation` says angle brackets are placeholders and text
+    // outside them is literal, which is what makes `<prefix>none` readable.
+    writeln!(o, "    \"empty_set_spelling\": \"<prefix>none\",").unwrap();
     writeln!(o, "    \"digest_marker\": \"fnv1a64-<hex16>\",").unwrap();
     // ⚠️ The ALGORITHM and its constants, not merely the marker. Baracuda
     // reproduced all twelve vectors from this manifest and named this the
@@ -315,6 +334,44 @@ fn emit_declarative(o: &mut String) {
         )
     )
     .unwrap();
+    // ⚠️ The SORT KEY, which "sorted and deduplicated canonically" never gave.
+    //
+    // Found by baracuda writing a producer from the 0.4.2 manifest alone.
+    // Their sort ranked the component types and OMITTED the flag, so two
+    // tuples differing only in `-sat` or `-t` compared EQUAL and a stable
+    // sort emitted them in input order. Their output was not a decision at
+    // all; it was an artifact of the sort being stable.
+    //
+    // ⚠️ The gap could not have existed at 0.4.1: with no saturating and no
+    // transposing vector there was no pair differing in nothing but a flag.
+    // Closing GUESS-5 and GUESS-7 CREATED this question, and the vectors
+    // answer it while the prose did not.
+    writeln!(
+        o,
+        "    \"tuple_sort_key\": \"{}\",",
+        esc(
+            "Tuples sort lexicographically by their spelled components in order, with \
+             any trailing flag (`-sat`, `-t`) as the LAST key rather than outside the \
+             comparison; the unflagged form orders before the flagged one. \
+             Deduplication happens after sorting and before the length is measured."
+        )
+    )
+    .unwrap();
+    // ⚠️ What the threshold measures. `enumeration_bytes` names the quantity
+    // but nothing said the field PREFIX is excluded, and three or four bytes
+    // decide a borderline field -- the exact case where enumerate-versus-
+    // digest is hardest to test and a disagreement is a different cell.
+    writeln!(
+        o,
+        "    \"measured_length_excludes_prefix\": \"{}\",",
+        esc(
+            "The byte count compared against `digest_threshold_bytes` is the canonical \
+             enumeration alone. The field prefix (`cm-`, `cv-`) is NOT counted, and \
+             neither is the digest marker that replaces the enumeration above the \
+             threshold."
+        )
+    )
+    .unwrap();
     writeln!(o, "    \"digest_threshold_bytes\": {COOP_DIGEST_THRESHOLD}").unwrap();
     writeln!(o, "  }},").unwrap();
 }
@@ -369,7 +426,8 @@ fn emit_field_spec(o: &mut String) {
             "coopvec",
             "cv-",
             "Cooperative-VECTOR combinations. Each tuple is five component \
-             types plus a transpose flag. Same sort/dedup rule as <coop>, and \
+             types, followed by a literal `-t` when and only when the \
+             combination transposes. Same sort/dedup rule as <coop>, and \
              length-conditional on the same 512-byte threshold — but measured \
              and digested INDEPENDENTLY. The two fields switch on their own \
              bytes and never together, which is why both carry their own \

@@ -886,3 +886,259 @@ fn the_placeholder_notation_is_stated_rather_than_inferred() {
          read past."
     );
 }
+
+/// Composing `empty_set_spelling` against the declared prefixes must reproduce
+/// the spellings the tokens actually use.
+///
+/// ⚠️ This entry read `<prefix>-none` and was WRONG, not merely underspecified.
+/// `ops` declares prefix `ops-` and `coop` declares `cm-`, so the rule composed
+/// to `ops--none` and `cm--none` — a double dash, for four of the five fields —
+/// while the tokens spell `ops-none` and `cm-none`. A reader following the
+/// declarative half against the declared prefixes gets bytes that match
+/// nothing, and under §6.8-0002 that is a different cell rather than an error.
+///
+/// Raised by a foreign reader as *unpinned*; measured here it was
+/// *contradictory*, which is the stronger fault and the one no amount of
+/// additional vectors would have surfaced — every vector spells the RIGHT
+/// bytes, so only composing the stated rule reveals that it disagrees.
+#[test]
+fn the_empty_set_rule_reproduces_the_spellings_the_tokens_use() {
+    let text = committed();
+
+    // What the tokens actually spell, e.g. `ops-none`, `cm-none`.
+    let mut observed: Vec<String> = Vec::new();
+    for (at, _) in text.match_indices("-none") {
+        let head = &text[..at];
+        let start = head
+            .rfind(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+            .map_or(0, |i| i + 1);
+        let word = format!("{}-none", &head[start..]);
+        if word.len() > 5 && !observed.contains(&word) {
+            observed.push(word);
+        }
+    }
+    // Positive control: with nothing observed, every assertion below is vacuous.
+    assert!(
+        observed.len() >= 3,
+        "found only {} empty-set spellings in the manifest ({observed:?}); the \
+         extractor broke rather than the vocabulary shrinking, and an empty \
+         list satisfies the check below by having nothing to contradict it",
+        observed.len()
+    );
+
+    // Every prefix the manifest declares, composed per the stated rule.
+    let mut composed: Vec<String> = Vec::new();
+    let rule = between(&text, "\"empty_set_spelling\": \"", "\"")
+        .expect("`declarative` carries no `empty_set_spelling`");
+    assert!(
+        rule.contains("<prefix>"),
+        "`empty_set_spelling` {rule:?} is not a composable template. A test \
+         cannot fail when the rule it is meant to check is the wrong one."
+    );
+
+    const PK: &str = "\"prefix\": \"";
+    for (at, _) in text.match_indices(PK) {
+        let p = &text[at + PK.len()..];
+        if let Some(end) = p.find('"') {
+            composed.push(rule.replace("<prefix>", &p[..end]));
+        }
+    }
+    assert!(
+        !composed.is_empty(),
+        "no `prefix` values found, so the rule was composed against nothing"
+    );
+
+    for word in &observed {
+        assert!(
+            composed.contains(word),
+            "the tokens spell {word:?}, which composing `empty_set_spelling` \
+             against the declared prefixes does not produce — it yields \
+             {composed:?}. The declarative half and the vectors disagree, and a \
+             reader who has only the declarative half emits the losing spelling."
+        );
+    }
+}
+
+/// The sort key must name the flag, and the tokens must show the direction.
+///
+/// ⚠️ `sorted and deduplicated canonically` never said whether the trailing
+/// flag participates in the KEY. A foreign producer ranked the components and
+/// omitted it, so two tuples differing only in `-sat` compared EQUAL and a
+/// stable sort emitted them in input order — an output that was not a decision
+/// at all. The gap could not have existed before the saturating and transposing
+/// vectors were added: closing two gaps created a third.
+#[test]
+fn the_sort_key_names_the_flag_and_the_tokens_agree() {
+    let text = committed();
+    let key = between(&text, "\"tuple_sort_key\": \"", "\"")
+        .expect("§6.8-0017: `declarative` carries no `tuple_sort_key`");
+    assert!(
+        key.contains("-sat") && key.contains("-t") && key.contains("LAST"),
+        "the sort key {key:?} does not name the trailing flags and their \
+         position. Naming the components alone is exactly the reading that \
+         makes two flag-differing tuples compare equal."
+    );
+
+    // And the behaviour it describes, measured rather than trusted: in both
+    // flag-bearing vectors the UNFLAGGED tuple is spelled first.
+    for (pins, flag, prefix) in [("saturating", "-sat", "cm-"), ("transpose", "-t", "cv-")] {
+        let line = vector_line(pins);
+        let token = between(&line, "\"token\": \"", "\"").expect("token");
+        let field = token
+            .split('.')
+            .find(|p| p.starts_with(prefix) && !p.ends_with("-none"))
+            .expect("a tuple field");
+        let tuples: Vec<&str> = field.split_once('-').unwrap().1.split(',').collect();
+        assert_eq!(
+            tuples.len(),
+            2,
+            "the {pins} vector no longer carries the flag-differing pair that \
+             pins this ordering"
+        );
+        assert!(
+            !tuples[0].ends_with(flag) && tuples[1].ends_with(flag),
+            "in the {pins} vector the flagged tuple is spelled first ({tuples:?}), \
+             contradicting `tuple_sort_key`. The prose and the vectors must not \
+             disagree: a reader trusting the prose emits the other order."
+        );
+    }
+}
+
+/// Every rule-shaped value must be on the checked list.
+///
+/// ⚠️ baracuda's class, after `empty_set_spelling` turned out to CONTRADICT the
+/// vectors rather than merely under-specify them: *a declarative rule that
+/// disagrees with the corpus is invisible to every vector-based check, because
+/// the vectors are all correct.* A vector suite validates the vectors against a
+/// producer; it never validates a RULE against the vectors. Only composing the
+/// stated rule and comparing its output to the corpus finds it.
+///
+/// ⚠️ The list is DECLARED, not accumulated. An accumulating check cannot report
+/// a rule it never reached — the same construction that hid a residue item from
+/// its own ledger — so a new placeholder-bearing value that nobody wrote a check
+/// for fails here instead of passing silently.
+#[test]
+fn every_rule_shaped_value_is_on_the_checked_list() {
+    const CHECKED: &[&str] = &[
+        "grammar",
+        "unnamed_component_escape",
+        "empty_set_spelling",
+        "digest_marker",
+        "unnamed_component_escape_order",
+        "notation",
+        "vectors_digest_input",
+        // Prose that MENTIONS placeholders rather than being one. These
+        // three cannot be composed against the corpus: `notation` defines the
+        // convention, `vectors_digest_input` is an instruction, and
+        // `coverage_note` quotes examples. Listed so the gate stays a
+        // DECLARATION rather than a filter that silently drops what it
+        // cannot handle.
+        "coverage_note",
+    ];
+
+    let text = committed();
+    let mut found: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let t = line.trim();
+        if !t.contains('<') || !t.starts_with('"') {
+            continue;
+        }
+        if let Some(end) = t[1..].find('"') {
+            found.push(t[1..=end].to_string());
+        }
+    }
+    // Positive control: nothing found means the scan broke, and every
+    // assertion below would be satisfied by an empty list.
+    assert!(
+        found.len() >= 4,
+        "found only {found:?} rule-shaped values; the scan broke rather than \
+         the manifest losing its placeholders"
+    );
+    for key in &found {
+        assert!(
+            CHECKED.contains(&key.as_str()),
+            "`{key}` carries a `<...>` placeholder but is not on the checked \
+             list. Either compose it against the corpus in \
+             `the_composable_rules_produce_what_the_tokens_spell`, or add it \
+             here with a comment saying why it cannot be composed. A rule that \
+             nothing composes is one nobody can discover is wrong."
+        );
+    }
+}
+
+/// The composable rules must produce what the tokens actually spell.
+#[test]
+fn the_composable_rules_produce_what_the_tokens_spell() {
+    let text = committed();
+    let rule = |k: &str| {
+        between(&text, &format!("\"{k}\": \""), "\"")
+            .unwrap_or_else(|| panic!("no `{k}` in the manifest"))
+            .to_string()
+    };
+
+    // `grammar` — every token must have the shape it states.
+    let grammar = rule("grammar");
+    let fields = grammar.matches('.').count() + 1;
+    let mut tokens = 0;
+    for (at, _) in text.match_indices("\"token\": \"vulkan:") {
+        let tok = &text[at + "\"token\": \"".len()..];
+        let tok = &tok[..tok.find('"').expect("token end")];
+        assert_eq!(
+            tok.matches('.').count() + 1,
+            fields,
+            "token {tok:?} has {} fields; `grammar` states {fields}. \
+             §6.8-0002 matches byte-exact, so a field-count disagreement \
+             between the rule and the corpus is a cell nobody can reach.",
+            tok.matches('.').count() + 1
+        );
+        tokens += 1;
+    }
+    assert!(
+        tokens >= 10,
+        "only {tokens} tokens checked against `grammar`"
+    );
+
+    // `digest_marker` -- `fnv1a64-<hex16>` means sixteen lowercase hex digits.
+    //
+    // ⚠️ Scoped to where a digest actually LIVES: token values and the
+    // top-level `vectors_digest`. A whole-file scan matched the rule stating
+    // ITSELF -- `fnv1a64-<hex16>` in `digest_marker`, and the same string
+    // quoted inside `notation` as "`fnv1a64-` followed by sixteen hex digits".
+    // Skipping those by their next character would have been a filter tuned to
+    // the prose that happens to exist today; naming the corpus is the fix.
+    let marker = rule("digest_marker");
+    let lit = marker.split('<').next().expect("marker literal");
+    let mut corpus: Vec<String> = vec![rule("vectors_digest")];
+    for (at, _) in text.match_indices("\"token\": \"") {
+        let t = &text[at + "\"token\": \"".len()..];
+        corpus.push(t[..t.find('"').expect("token end")].to_string());
+    }
+    let mut digests = 0;
+    for entry in &corpus {
+        for (at, _) in entry.match_indices(lit) {
+            let hex: String = entry[at + lit.len()..].chars().take(16).collect();
+            assert!(
+                hex.len() == 16
+                    && hex
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+                "in {entry:?} the text after {lit:?} is {hex:?}, which is not \
+                 sixteen lowercase hex digits as `digest_marker` states"
+            );
+            digests += 1;
+        }
+    }
+    assert!(
+        digests >= 2,
+        "only {digests} digests checked against the marker"
+    );
+
+    // `unnamed_component_escape` — `x<n>` means a literal `x` then digits.
+    let escape = rule("unnamed_component_escape");
+    let head = escape.split('<').next().expect("escape literal");
+    assert_eq!(
+        head, "x",
+        "`unnamed_component_escape` is {escape:?}; its literal head is {head:?} \
+         and the tokens spell unnamed components with `x`"
+    );
+}
