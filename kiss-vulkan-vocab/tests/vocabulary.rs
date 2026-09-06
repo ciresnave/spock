@@ -607,3 +607,75 @@ fn coopvec_digest_hashes_the_string_it_measured() {
 
     assert_eq!(hex, format!("{:016x}", fnv1a64(joined.as_bytes())));
 }
+
+/// The module doc's grammar must describe the token `to_token` actually emits.
+///
+/// ⚠️ Built because it did not. `to_token` has emitted FIVE fields since the v4
+/// bump — `subgroup.ops.arith.coop.coopvec` — while the module doc's grammar
+/// line, its "Four fields in fixed positions" sentence and its field table all
+/// described FOUR, omitting `coopvec` entirely.
+///
+/// That is not cosmetic in this crate. This is the published description of the
+/// `vulkan:` namespace grammar, and KISS-Classify §6.8-0002 matches
+/// **byte-exact with no tolerance**. A second implementer reading the doc would
+/// emit a four-field token that can never match anything this crate produces —
+/// and `parse` would reject it, because `parse` requires exactly five. **The
+/// doc was the only artifact describing the grammar to someone outside this
+/// repository, and it was the one that was wrong.**
+///
+/// Checked three ways against one source of truth, because the failure was that
+/// two of them disagreed silently: the `format!` in `to_token`, the `//!`
+/// grammar line, and the field table's data rows.
+#[test]
+fn the_grammar_doc_matches_what_to_token_emits() {
+    let src = include_str!("../src/lib.rs");
+
+    // The emitter is the authority: count the `{}` holes after the namespace.
+    let fmt = src
+        .split("pub fn to_token")
+        .nth(1)
+        .and_then(|tail| tail.split('"').nth(1))
+        .expect(
+            "to_token's format string must be findable; if it was restructured, \
+                 restructure this WITH it rather than deleting -- an unfindable \
+                 emitter makes this gate vacuous",
+        );
+    let emitted = fmt.matches("{}").count() - 1; // less the namespace hole
+    assert!(
+        (2..=12).contains(&emitted),
+        "parsed {emitted} fields out of {fmt:?}; that is not a plausible token \
+         shape, so the parser broke rather than the doc"
+    );
+
+    // The `//!` grammar line: `vulkan:<a>.<b>...`
+    let grammar = src
+        .lines()
+        .find(|l| l.starts_with("//! vulkan:<"))
+        .expect("the module doc must carry a `vulkan:<...>` grammar line");
+    let declared = grammar.matches('<').count();
+
+    // The field table's data rows: `//! | name | ... |`, excluding header and
+    // separator, which do not match the lowercase-name shape.
+    let rows = src
+        .lines()
+        .filter(|l| {
+            l.starts_with("//! | ")
+                && l.split('|').nth(1).is_some_and(|c| {
+                    let c = c.trim();
+                    !c.is_empty() && c.chars().all(|ch| ch.is_ascii_lowercase())
+                })
+        })
+        .count();
+
+    assert_eq!(
+        emitted, declared,
+        "`to_token` emits {emitted} fields but the grammar line declares \
+         {declared}: {grammar}"
+    );
+    assert_eq!(
+        emitted, rows,
+        "`to_token` emits {emitted} fields but the field table documents {rows}. \
+         A missing row is a field an outside implementer never learns to spell, \
+         and §6.8-0002 gives no matching tolerance."
+    );
+}

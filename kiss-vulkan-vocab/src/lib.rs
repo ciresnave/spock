@@ -42,10 +42,10 @@
 //! # Grammar
 //!
 //! ```text
-//! vulkan:<subgroup>.<ops>.<arith>.<coop>
+//! vulkan:<subgroup>.<ops>.<arith>.<coop>.<coopvec>
 //! ```
 //!
-//! Four fields in fixed positions, separated by `.`; parts *within* a field
+//! FIVE fields in fixed positions, separated by `.`; parts *within* a field
 //! separated by `-`. Every set is canonically sorted and every field is
 //! always present, so two independent implementations spelling the same
 //! target produce identical bytes — which KISS-Classify §6.8-0002 requires, since it gives
@@ -57,6 +57,7 @@
 //! | ops | `ops-abr`, `ops-none` | subgroup operation classes the kernel requires, canonically sorted |
 //! | arith | `arith-f16-i8`, `arith-none` | arithmetic capabilities the kernel requires |
 //! | coop | `cm-16-16-16-f16-f16-f32-f32`, `cm-none`, `cm-fnv1a64-<hex>` | cooperative-matrix shapes the kernel uses |
+//! | coopvec | `cv-u32-i8packed-i8-i32-x1001`, `cv-none`, `cv-fnv1a64-<hex>` | cooperative-vector combinations the kernel uses |
 //!
 //! ```
 //! use kiss_vulkan_vocab::{VulkanTarget, Subgroup, OpClasses, Arith, CoopMatrix, CoopVector};
