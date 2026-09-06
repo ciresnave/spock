@@ -21,7 +21,7 @@
     "arith_names": ["dot8", "f16", "f64", "i16", "i64", "i8", "st16", "st8"],
     "component_types": ["f16", "f32", "f64", "bf16", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f8e4m3fn", "f8e5m2", "i8packed", "u8packed"],
     "unnamed_component_escape": "x<n>",
-    "empty_set_spelling": "<prefix>-none",
+    "empty_set_spelling": "<prefix>none",
     "digest_marker": "fnv1a64-<hex16>",
     "digest_algorithm": "FNV-1a 64-bit",
     "digest_offset_basis": "0xcbf29ce484222325",
@@ -30,6 +30,8 @@
     "digest_hex": "lowercase, zero-padded to exactly 16 digits",
     "unnamed_component_escape_order": "numeric on <n>, not lexicographic",
     "vectors_digest_input": "Take each element of `vectors` AS RAW TEXT, exactly as this manifest renders it -- do NOT parse and re-serialize it, because a producer that re-serializes emits its own key order and whitespace and gets different bytes. Trim surrounding whitespace and any trailing comma. Delete the element's `note` member and the `, ` separating it, locating the member's end by JSON string-scanning rather than by searching for `, `, since a note's own prose contains that sequence. Concatenate the results in array order, each followed by U+000A, and digest the UTF-8 bytes using the algorithm and constants above. Defined over whatever members an element actually carries, never a fixed template: a `digest_input` vector carries no `token` at all.",
+    "tuple_sort_key": "Tuples sort lexicographically by their spelled components in order, with any trailing flag (`-sat`, `-t`) as the LAST key rather than outside the comparison; the unflagged form orders before the flagged one. Deduplication happens after sorting and before the length is measured.",
+    "measured_length_excludes_prefix": "The byte count compared against `digest_threshold_bytes` is the canonical enumeration alone. The field prefix (`cm-`, `cv-`) is NOT counted, and neither is the digest marker that replaces the enumeration above the threshold.",
     "digest_threshold_bytes": 512
   },
   "field_spec": [
@@ -37,7 +39,7 @@
     { "field": "ops", "prefix": "ops-", "note": "Subgroup operation classes, spelled as JUXTAPOSED single ASCII letters in the canonical order given by `ops_alphabet`. Juxtaposition is safe only because that alphabet is fixed-width (§6.8-0006)." },
     { "field": "arith", "prefix": "arith-", "note": "Arithmetic capabilities, spelled as NAMED parts joined by `-` in the canonical order given by `arith_names` — the names are variable-length, so juxtaposition would not stay uniquely decodable as the set grows. Note `st8`/`st16` are STORAGE capabilities and are not compute precision: a conformant device may accept 16-bit data in a buffer and perform the arithmetic in f32. Reading one as the other is a silently wrong lowering." },
     { "field": "coop", "prefix": "cm-", "note": "Cooperative-MATRIX shapes. Each tuple is M-N-K plus four component types, joined by `-`, followed by a literal `-sat` when and only when the shape saturates; tuples are joined by `,`. Sorted and deduplicated canonically, because driver report order is not guaranteed stable and the token must be byte-identical either way. LENGTH-CONDITIONAL — see the `threshold` and `digest_input` vectors." },
-    { "field": "coopvec", "prefix": "cv-", "note": "Cooperative-VECTOR combinations. Each tuple is five component types plus a transpose flag. Same sort/dedup rule as <coop>, and length-conditional on the same 512-byte threshold — but measured and digested INDEPENDENTLY. The two fields switch on their own bytes and never together, which is why both carry their own threshold vectors." }
+    { "field": "coopvec", "prefix": "cv-", "note": "Cooperative-VECTOR combinations. Each tuple is five component types, followed by a literal `-t` when and only when the combination transposes. Same sort/dedup rule as <coop>, and length-conditional on the same 512-byte threshold — but measured and digested INDEPENDENTLY. The two fields switch on their own bytes and never together, which is why both carry their own threshold vectors." }
   ],
   "vectors": [
     { "pins": "order", "field": "coop", "note": "Shapes presented in non-canonical order. A producer that emitted driver order would differ from an honest peer on the same device, and under byte-exact matching that is a different cell rather than a degraded answer.", "input": { "subgroup": 32, "ops": [], "arith": [], "coop": [{"m":13,"n":10,"k":16,"a":"f16","b":"f16","c":"f32","result":"f32","saturating":false},{"m":11,"n":10,"k":16,"a":"f16","b":"f16","c":"f32","result":"f32","saturating":false},{"m":12,"n":10,"k":16,"a":"f16","b":"f16","c":"f32","result":"f32","saturating":false}], "coopvec": [] }, "token": "vulkan:sg32.ops-none.arith-none.cm-11-10-16-f16-f16-f32-f32,12-10-16-f16-f16-f32-f32,13-10-16-f16-f16-f32-f32.cv-none" },

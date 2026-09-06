@@ -60,6 +60,91 @@ only a producer written from 0.4.2 alone measures what a reader arriving today
 still has to supply. That run is outstanding, and the digest half already has a
 fresh residue of three, one of them real — this entry.
 
+
+### Fixed — `empty_set_spelling` was WRONG, not merely unpinned
+
+It read **`<prefix>-none`**. `ops` declares prefix `ops-` and `coop` declares
+`cm-`, so composing the rule against the manifest's own prefixes yields
+**`ops--none`** and **`cm--none`** — a double dash, for four of the five fields —
+while the tokens spell `ops-none` and `cm-none`. **A reader following the
+declarative half against the declared prefixes emits bytes that match nothing**,
+and under §6.8-0002 that is a different cell rather than an error.
+
+Raised by baracuda as *unpinned*; measured here it is *contradictory*, which is
+the stronger fault and the one no additional vector could surface — every vector
+spells the right bytes, so only **composing the stated rule** reveals it
+disagrees.
+
+⚠️ **The first repair replaced it with a correct SENTENCE, and the drill caught
+that.** Restoring the defect left the new gate **GREEN**, because prose cannot be
+composed and the test had quietly hardcoded the rule instead of following the
+stated one. It is now the template `<prefix>none`, and the gate substitutes each
+declared prefix into **the value it reads from the manifest**.
+
+> **A machine-checkable value that is wrong is a bug. An unfalsifiable value
+> that is right is a worse bug — the next wrong one arrives with nothing able to
+> say so.**
+
+### Added — the sort key, which "sorted and deduplicated canonically" never gave
+
+⚠️ baracuda's producer ranked the components and **omitted the flag**, so two
+tuples differing only in `-sat` or `-t` compared **equal** and a stable sort
+emitted them in input order. **Their output was not a decision at all** — it was
+an artifact of the sort being stable.
+
+**The gap could not have existed at 0.4.1**: with no saturating and no
+transposing vector there was no pair differing in nothing but a flag. **Closing
+GUESS-5 and GUESS-7 created this question**, and the vectors answered it while
+the prose did not. `declarative.tuple_sort_key` now states that the flag is the
+**last key** and that the unflagged form orders first; the gate checks the prose
+*and* measures the tokens, so the two cannot drift apart.
+
+### Added — what the threshold actually measures
+
+`enumeration_bytes` named the quantity, but nothing said the **field prefix is
+excluded**. Three or four bytes decide a borderline field — the exact case where
+enumerate-versus-digest is hardest to test and a disagreement is a different
+cell. `declarative.measured_length_excludes_prefix` says so.
+
+### Fixed — the `coopvec` prose still did not spell its flag
+
+The `coop` entry was corrected in 0.4.2 to spell `-sat`; **its sibling still
+read "five component types plus a transpose flag" and never spelled `-t`.**
+⚠️ That is the `sgdyn`/`transpose` per-instance-versus-per-class error a third
+time, **in the same file, in the commit that fixed the first instance** — caught
+by a foreign reader rather than here.
+
+
+### Added — every rule-shaped value is now composed against the corpus
+
+⚠️ **baracuda's class, and it caught this repository a fourth time.** After
+`empty_set_spelling` turned out to contradict the vectors, they named the shape:
+
+> **A declarative rule that contradicts the vectors is invisible to every
+> vector-based check, because the vectors are all correct.** A vector suite
+> validates the vectors against a producer; it never validates a **rule** against
+> the vectors. Only composing the stated rule and comparing its output to the
+> corpus finds it.
+
+Measured here: **five values are rule-shaped and exactly one was gated** — the
+one they found. Per-instance again, with the class handed over explicitly in the
+message beforehand.
+
+Two gates close it. `every_rule_shaped_value_is_on_the_checked_list` **declares**
+the rule keys rather than accumulating them, so a future placeholder-bearing
+value that nothing composes **fails** instead of passing silently — the
+`[NOT EXERCISED]` argument in a different medium, since an accumulating check
+cannot report a rule it never reached. `the_composable_rules_produce_what_the_tokens_spell`
+composes `grammar` against every token's field count, `digest_marker` against
+every digest, and `unnamed_component_escape` against the unnamed spellings.
+
+⚠️ Both gates failed on first run, and both failures were the gates working: one
+demanded that `coverage_note` — prose that *mentions* placeholders — be
+explicitly accounted for, and the other caught the digest scan matching **the
+rule stating itself** (`fnv1a64-<hex16>` inside `digest_marker`, and quoted again
+inside `notation`). The scan is now scoped to where a digest actually lives
+rather than filtered by the shape of whatever prose happens to exist today.
+
 ## [kiss-vulkan-vocab 0.4.2] — 2026-09-06
 
 ### Added — `vectors_digest`, so a demonstration can go stale (KISS-Classify §6.8-0017)
