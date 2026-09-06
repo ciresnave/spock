@@ -452,13 +452,11 @@ jobs:
       # Verified against the defect rather than against the fix: at 64001e7,
       # `vulkane/Cargo.toml` said 0.14.0 and CHANGELOG.md contained zero
       # `## [0.14.0]` sections. This step reds there.
-      - name: The changelog names the version being shipped
+      - name: The changelog names every version being shipped
         shell: bash
         run: |
           set -euo pipefail
-          version="$(cargo metadata --no-deps --format-version 1 \
-            | python3 -c "import sys,json; print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='vulkane'))")"
-          # Positive control first. If the heading shape ever changes, the two
+          # Positive controls first. If the heading shape ever changes, the
           # assertions below would compare against nothing and pass, which is
           # the failure this whole file exists to prevent.
           total="$(grep -c '^## \[' CHANGELOG.md || true)"
@@ -473,18 +471,56 @@ jobs:
             echo "version instead."
             exit 1
           fi
-          if ! grep -q "^## \[$version\]" CHANGELOG.md; then
-            echo "vulkane/Cargo.toml declares $version and CHANGELOG.md has no"
-            echo "'## [$version]' section."
+          # EVERY publishable member, not just `vulkane`.
+          #
+          # The first version of this step read one crate's version, and this
+          # repository publishes FOUR. A companion-only release is invisible
+          # to a gate that knows one name: `kiss-vulkan-vocab 0.4.2` shipped
+          # alone, and the version it would have checked -- vulkane's -- had
+          # not moved, so the gate stayed green over a crate on crates.io with
+          # no section at all. That is #41's defect reached through a
+          # different crate, and #50 fixed the instance rather than the class.
+          #
+          # `tr -d` is not cosmetic: a Windows python3 prints CRLF, the CR
+          # rides into `read` as part of the version, and every pattern below
+          # then contains a literal carriage return and matches nothing. The
+          # harness runs this workflow locally on Windows, so without it the
+          # gate reds there and passes on the runner -- a gate that disagrees
+          # with itself by platform is worse than one that is merely wrong.
+          pairs="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c "import sys,json; print('\n'.join(p['name'] + ' ' + p['version'] for p in json.load(sys.stdin)['packages'] if p.get('publish') != []))" \
+            | tr -d '\r')"
+          found="$(printf '%s\n' "$pairs" | grep -c . || true)"
+          if [ "$found" -lt 2 ]; then
+            echo "cargo metadata reported $found publishable members. The loop"
+            echo "below would check nothing and report success, so this fails"
+            echo "rather than passes."
+            exit 1
+          fi
+          missing=""
+          while read -r name ver; do
+            [ -z "$name" ] && continue
+            # `vulkane` heads its own sections bare (`## [0.16.0]`); a
+            # companion is named in the heading it shipped under, either its
+            # own (`## [kiss-vulkan-vocab 0.4.2]`) or the parent release's
+            # parenthetical. Either form counts -- what must not happen is a
+            # published version no heading mentions anywhere.
+            if grep -q "^## \[$ver\]" CHANGELOG.md; then continue; fi
+            if grep '^## \[' CHANGELOG.md | grep -qF "$name $ver"; then continue; fi
+            missing="$missing $name $ver;"
+          done <<< "$pairs"
+          if [ -n "$missing" ]; then
+            echo "These publishable crates declare a version that no CHANGELOG.md"
+            echo "heading names:$missing"
             echo
-            echo "If $version is published, the repository is denying the"
+            echo "If any of them is published, the repository is denying the"
             echo "existence of a version that is on crates.io. Stamp a dated"
             echo "header beneath an empty '## [Unreleased]' -- see the Release"
             echo "Process in CONTRIBUTING.md, step 3."
             exit 1
           fi
-          echo "CHANGELOG.md names $version, and [Unreleased] is present"
-          echo "($total released sections total)."
+          echo "CHANGELOG.md names all $found publishable versions, and"
+          echo "[Unreleased] is present ($total released sections total)."
 
   format:
     name: rustfmt

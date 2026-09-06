@@ -675,3 +675,132 @@ fn the_tiebreak_vector_pins_the_field_order() {
         tuples[1]
     );
 }
+
+/// A reader MUST be able to rebuild `vectors_digest` from `vectors` by the
+/// construction pinned in `declarative` (KISS-CLASSIFY-6.8-0017).
+///
+/// ⚠️ This rebuilds BY HAND from the committed text and deliberately does not
+/// call the emitter's `without_note` / `vectors_digest_input`, even though both
+/// are in scope here — the test `#[path]`-includes the generator. Calling them
+/// would compare the emitter against itself and pass for any construction
+/// whatsoever, including one no second party could follow. The whole purpose of
+/// this digest is agreement BETWEEN parties, so the check has to be a second
+/// implementation or it is not a check.
+///
+/// The same rebuild was performed once more outside this repository, in another
+/// language, written from the pinned sentence alone; it produced the same
+/// sixteen-hex-digit value.
+#[test]
+fn vectors_digest_is_rebuildable_from_the_pinned_construction() {
+    let text = committed();
+
+    // The pin is the load-bearing half of the clause. If it is absent there is
+    // nothing to follow, and every value below would agree with itself.
+    let pin = between(&text, "\"vectors_digest_input\": \"", "\"").expect(
+        "§6.8-0017: `declarative` carries no `vectors_digest_input`. The \
+         namespace MUST pin the construction: KISS pins the algorithm and \
+         constants and explicitly does NOT define this input, so an unpinned \
+         digest is a number every party computes differently and each one \
+         compares only against itself.",
+    );
+    assert!(
+        pin.contains("UTF-8") && pin.contains("note"),
+        "the pinned construction {pin:?} does not state its character encoding \
+         and its treatment of `note`. §6.8-0017 requires both by name — and the \
+         encoding is unobservable here precisely because excluding notes makes \
+         the input pure ASCII, so a corpus that cannot expose the question is \
+         the reason to state the answer."
+    );
+
+    // "each element's JSON text exactly as this manifest renders it
+    //  (surrounding whitespace and any trailing comma removed)"
+    let mut elements: Vec<String> = Vec::new();
+    let mut inside = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with("\"vectors\": [") {
+            inside = true;
+            continue;
+        }
+        if inside {
+            if t == "]" || t == "]," {
+                break;
+            }
+            elements.push(t.strip_suffix(',').unwrap_or(t).to_string());
+        }
+    }
+    // Positive control: a slice that captured nothing digests the empty string
+    // to the FNV basis, which is a well-formed sixteen-hex-digit answer.
+    assert!(
+        elements.len() > 10,
+        "sliced {} vector elements; the extractor broke rather than the \
+         manifest shrinking, and an empty slice still produces a plausible digest",
+        elements.len()
+    );
+
+    // "with its `note` member and the `, ` separating it deleted"
+    let strip = |e: &str| -> String {
+        const KEY: &str = "\"note\": \"";
+        let Some(at) = e.find(KEY) else {
+            return e.to_string();
+        };
+        let body = &e[at + KEY.len()..];
+        let mut escaped = false;
+        let mut end = None;
+        for (i, c) in body.char_indices() {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                end = Some(i);
+                break;
+            }
+        }
+        let end = end.expect("a note string that never closes");
+        let rest = &body[end + 1..];
+        format!("{}{}", &e[..at], rest.strip_prefix(", ").unwrap_or(rest))
+    };
+
+    // "each followed by U+000A"
+    let input: String = elements.iter().map(|e| strip(e) + "\n").collect();
+    assert!(
+        !input.contains("\"note\""),
+        "the rebuilt digest input still contains a `note` member, so the \
+         stripper matched nothing and the digest below is over the wrong bytes"
+    );
+
+    let rebuilt = format!(
+        "fnv1a64-{:016x}",
+        kiss_vulkan_vocab::fnv1a64(input.as_bytes())
+    );
+    let carried = between(&text, "\"vectors_digest\": \"", "\"")
+        .expect("the manifest carries no top-level `vectors_digest`");
+
+    assert_eq!(
+        rebuilt, carried,
+        "a reader rebuilding `vectors_digest` by the pinned construction gets \
+         {rebuilt}, but the manifest carries {carried}. §6.8-0017 requires the \
+         rebuild to compare BYTE-EXACT, so that a producer may disagree about \
+         whether the digest is current but never about what was digested. A \
+         mismatch means the pinned sentence does not describe what this \
+         emitter does — and the sentence is the only thing a second party has."
+    );
+
+    // ⚠️ Negative control. Note-exclusion is a REQUIREMENT of the clause, and
+    // the input here is pure ASCII only BECAUSE of it. If keeping the notes
+    // produced the same digest, the exclusion would be inert and the agreement
+    // above would be telling us nothing about it.
+    let with_notes: String = elements.iter().map(|e| e.clone() + "\n").collect();
+    assert_ne!(
+        format!(
+            "fnv1a64-{:016x}",
+            kiss_vulkan_vocab::fnv1a64(with_notes.as_bytes())
+        ),
+        carried,
+        "digesting WITH the notes yields the same value as without them, so \
+         either the notes are empty or the stripper did nothing. Excluding \
+         them would then be an untested clause requirement rather than a \
+         behaviour, and a prose fix would silently move the digest."
+    );
+}
