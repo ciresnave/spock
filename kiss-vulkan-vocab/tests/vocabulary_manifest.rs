@@ -1025,6 +1025,12 @@ fn every_rule_shaped_value_is_on_the_checked_list() {
         "empty_set_spelling",
         "digest_marker",
         "unnamed_component_escape_order",
+        // EXECUTED rather than composed: it is prose describing an
+        // algorithm, so the instrument is
+        // `executing_the_stated_sort_rule_reproduces_the_token_order`,
+        // which runs the rule and compares. The composition gate cannot
+        // reach a rule that is not a template.
+        "tuple_sort_key",
         "notation",
         "vectors_digest_input",
         // Prose that MENTIONS placeholders rather than being one. These
@@ -1140,5 +1146,121 @@ fn the_composable_rules_produce_what_the_tokens_spell() {
         head, "x",
         "`unnamed_component_escape` is {escape:?}; its literal head is {head:?} \
          and the tokens spell unnamed components with `x`"
+    );
+}
+
+/// Rank a `<coopvec>` component the way `tuple_sort_key` says: by its index in
+/// `component_types`, with unnamed `x<n>` escapes after every named type.
+fn component_rank(types: &[&str], c: &str) -> usize {
+    if let Some(i) = types.iter().position(|t| *t == c) {
+        return i;
+    }
+    let n: usize = c
+        .strip_prefix('x')
+        .and_then(|d| d.parse().ok())
+        .unwrap_or_else(|| panic!("component {c:?} is neither named nor an `x<n>` escape"));
+    types.len() + n
+}
+
+/// Executing the stated sort rule must reproduce the order the tokens carry.
+///
+/// ⚠️ `tuple_sort_key` previously read "lexicographically by their spelled
+/// components". The code sorts by ORDINAL, and the two disagree: `u32` precedes
+/// `u8` as text and follows it in `component_types`. Every vector was correct,
+/// so nothing in the corpus could contradict the sentence — the same shape as
+/// `empty_set_spelling` composing to `cm--none`.
+///
+/// ⚠️ The composition gate cannot reach this. That one substitutes into
+/// TEMPLATES; this rule is prose describing an ALGORITHM, and the only
+/// instrument that finds it is running the algorithm and comparing. Restricted
+/// to `<coopvec>`, whose five fields are all component types — `<coop>` leads
+/// with three integers and would need a second comparison rule to say nothing
+/// new.
+#[test]
+fn executing_the_stated_sort_rule_reproduces_the_token_order() {
+    let text = committed();
+    // The execution below proves what the CORPUS does. It hardcodes the ordinal
+    // rule, so on its own it would pass no matter what the prose said -- the
+    // exact blindness that let `empty_set_spelling` ship wrong. These two
+    // assertions tie the STATED rule to the EXECUTED one.
+    let stated = between(&text, "\"tuple_sort_key\": \"", "\"").expect("tuple_sort_key");
+    assert!(
+        stated.contains("component_types"),
+        "`tuple_sort_key` is {stated:?} and does not name `component_types` as \
+         the ordering source. The corpus sorts by that array index; a rule \
+         naming anything else describes a different vocabulary."
+    );
+    assert!(
+        stated.contains("NOT by comparing the spelled"),
+        "`tuple_sort_key` is {stated:?} and does not disclaim string \
+         comparison. It previously read \"lexicographically by their spelled \
+         components\", which disagrees with the corpus wherever spelling order \
+         and array order differ -- `u32` precedes `u8` as text and follows it \
+         in the array. The disclaimer is the half a reader needs, because the \
+         two rules agree on most pairs and a producer can pass many vectors \
+         with the wrong one."
+    );
+
+    let types_raw = between(&text, "\"component_types\": [", "]").expect("component_types");
+    let types: Vec<&str> = types_raw
+        .split(',')
+        .map(|s| s.trim().trim_matches('"'))
+        .filter(|s| !s.is_empty())
+        .collect();
+    assert!(types.len() > 10, "component_types parsed as {types:?}");
+
+    let key = |t: &str| {
+        let (body, flag) = match t.strip_suffix("-t") {
+            Some(b) => (b, 1),
+            None => (t, 0),
+        };
+        let mut k: Vec<usize> = body.split('-').map(|c| component_rank(&types, c)).collect();
+        k.push(flag);
+        k
+    };
+
+    let mut checked = 0;
+    let mut discriminating = 0;
+    for (at, _) in text.match_indices(".cv-") {
+        let f = &text[at + 1..];
+        let f = &f[..f.find(['.', '"']).expect("field end")];
+        let body = &f[3..];
+        if body == "none" || body.starts_with("fnv1a64-") {
+            continue;
+        }
+        let emitted: Vec<&str> = body.split(',').collect();
+        if emitted.len() < 2 {
+            continue;
+        }
+        let mut sorted = emitted.clone();
+        sorted.sort_by_key(|t| key(t));
+        assert_eq!(
+            sorted, emitted,
+            "executing `tuple_sort_key` on {emitted:?} yields {sorted:?}. The \
+             stated rule and the corpus disagree, and a producer following the \
+             prose emits a different enumeration — and, above the threshold, a \
+             different digest."
+        );
+        // ⚠️ The control that matters: does this vector actually SEPARATE the
+        // ordinal rule from a lexicographic one? If none does, the assertion
+        // above passes under either rule and proves nothing about which is
+        // stated. `u32` vs `u8` is the pair that separates them.
+        let mut lexicographic = emitted.clone();
+        lexicographic.sort_unstable();
+        if lexicographic != emitted {
+            discriminating += 1;
+        }
+        checked += 1;
+    }
+    assert!(
+        checked >= 3,
+        "only {checked} multi-tuple <coopvec> fields checked"
+    );
+    assert!(
+        discriminating >= 1,
+        "no vector distinguishes ordinal order from lexicographic order, so \
+         this test passes under either rule and says nothing about the one the \
+         manifest states. Add a pair whose spelling order and array order \
+         disagree — `u32` before `u8` as text, after it in `component_types`."
     );
 }
