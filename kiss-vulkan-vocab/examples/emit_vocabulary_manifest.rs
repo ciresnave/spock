@@ -350,14 +350,16 @@ fn emit_declarative(o: &mut String) {
         o,
         "    \"tuple_sort_key\": \"{}\",",
         esc(
-            "Tuples sort by each component's INDEX IN `component_types`, field by \
-             field in the order they are spelled -- NOT by comparing the spelled \
-             strings, which disagrees: `u32` precedes `u8` as text and follows it \
-             in the array. Unnamed `x<n>` escapes sort after every named type, \
-             numerically on n. Any trailing flag (`-sat`, `-t`) is the LAST key \
-             rather than outside the comparison, so the unflagged form orders \
-             before the flagged one. Deduplication happens after sorting and \
-             before the length is measured."
+            "A `<coop>` tuple's leading M, N and K compare as INTEGERS, before \
+             any component: as text `10` precedes `9`, so a producer sorting the \
+             spelled tuple emits the reverse order. Components then compare by \
+             INDEX IN `component_types`, field by field in the order they are \
+             spelled -- NOT by comparing the spelled strings, which disagrees: \
+             `u32` precedes `u8` as text and follows it in the array. Unnamed \
+             `x<n>` escapes sort after every named type, numerically on n. Any \
+             trailing flag (`-sat`, `-t`) is the LAST key rather than outside the \
+             comparison, so the unflagged form orders before the flagged one. \
+             Deduplication happens after sorting and before the length is measured."
         )
     )
     .unwrap();
@@ -501,6 +503,76 @@ fn vectors_digest_input(vectors: &[String]) -> String {
         s.push('\n');
     }
     s
+}
+
+/// That COMPONENTS compare by ordinal and not as text, in `<coopvec>`.
+///
+/// ⚠️ The sibling of `integer_order_vector`, and found the same way: by
+/// measuring rather than assuming. After adding a deliberate discriminator for
+/// `<coop>`, the same count over `<coopvec>` came back at ONE -- and that one
+/// is a threshold vector, pinning component ordering incidentally to its own
+/// purpose. The exact defect a foreign reader had just reported for `<coop>`,
+/// sitting in the field the fix did not sweep.
+///
+/// ⚠️ Fixing the instance that TAUGHT the class, and not the class, is the
+/// error this file has now made six times. The count is the only thing that
+/// catches it, which is why the gate asserts it PER FIELD rather than overall.
+fn component_order_vector() -> String {
+    coopvec_vector(
+        "component_order",
+        "Two combinations differing only in their input type, `u8` and `u32`, \
+         given u32-first. Pins that components compare by INDEX IN \
+         `component_types` -- u8 is index 8 and u32 is index 10 -- and not as \
+         text, where `u32` precedes `u8`. A producer sorting spellings emits \
+         the reverse of this token.",
+        &[
+            CoopVecCombo {
+                input: ComponentType::U32,
+                ..combo(1)
+            },
+            CoopVecCombo {
+                input: ComponentType::U8,
+                ..combo(1)
+            },
+        ],
+    )
+}
+
+/// That M, N and K compare as INTEGERS and not as text.
+///
+/// ⚠️ Added because the corpus pinned this in exactly ONE vector, and that
+/// vector's `pins` field says `threshold`. Measured across every multi-tuple
+/// `<coop>` vector: four agree under numeric and lexicographic order and so
+/// discriminate nothing; only the 25-tuple threshold vector separates them,
+/// and it does so incidentally to the reason it exists.
+///
+/// ⚠️ So an editor changing that vector's shape set FOR THRESHOLD REASONS --
+/// the whole reason to touch it -- could silently delete the only evidence of
+/// integer ordering in the manifest, with nothing to say so. A population of
+/// one, load-bearing by accident.
+///
+/// Found by a foreign party after the rule became precise enough for the
+/// omission to stand out: it named components, escapes, flags and dedup, and
+/// never the three leading dimensions. Precision made the hole visible.
+fn integer_order_vector() -> String {
+    coop_vector(
+        "integer_order",
+        "Two shapes whose M values are 9 and 10, given larger-first. Pins that \
+         the leading dimensions compare NUMERICALLY: as text `10` precedes `9`, \
+         so a producer sorting the spelled tuple emits the reverse. This is the \
+         only vector whose PURPOSE is that distinction -- the threshold vector \
+         happens to make it too, which is why this one exists.",
+        &[
+            CoopShape {
+                m: 10,
+                ..big_shape(1)
+            },
+            CoopShape {
+                m: 9,
+                ..big_shape(1)
+            },
+        ],
+    )
 }
 
 /// Where an unnamed `x<n>` escape sorts against a NAMED type.
@@ -679,6 +751,8 @@ fn flag_vectors() -> Vec<String> {
         saturating_vector(),
         tiebreak_vector(),
         escape_order_vector(),
+        integer_order_vector(),
+        component_order_vector(),
     ]
 }
 

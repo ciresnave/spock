@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [kiss-vulkan-vocab 0.4.5] — 2026-09-06
+
+### Fixed — the sort rule reached the components and never the DIMENSIONS
+
+`tuple_sort_key` named components, escapes, flags and dedup, and said nothing
+about the three leading M, N and K of a `<coop>` tuple. They compare as
+**integers**; a reader had to infer it, and ⚠️ **the rule's own precision made
+the omission read as deliberate scope rather than a gap.**
+
+It now states them. Measured by baracuda against published 0.4.4.
+
+### Added — two vectors, because the evidence was a POPULATION OF ONE
+
+⚠️ Integer ordering was pinned by **exactly one vector in the whole corpus, and
+that vector's `pins` field says `threshold`.** Four other multi-tuple `<coop>`
+vectors agree under numeric and lexicographic order and discriminate nothing;
+only the 25-tuple threshold vector separates them — **incidentally to the reason
+it exists.**
+
+**So an editor changing that vector's shape set for threshold reasons — the
+whole reason to touch it — could silently delete the only evidence of integer
+ordering, with nothing to say so.** `integer_order` now pins it deliberately:
+M values of 9 and 10, given larger-first, where text order and numeric order
+disagree.
+
+⚠️ **And measuring afterwards found the same defect in the field the fix did not
+sweep.** With `<coop>` at two discriminators, the same count over `<coopvec>`
+returned **one** — again a threshold vector, again incidental. `component_order`
+closes it: `u8` against `u32`, which sort oppositely as text and as ordinals.
+
+**Fixing the instance that taught the class, and not the class, is the error
+this repository has now made six times.** The count is the only thing that
+catches it.
+
+### Changed — the execution gate covers both fields and counts PER FIELD
+
+An earlier version checked `<coopvec>` only, on the judgement that `<coop>`'s
+leading integers "would say nothing new". ⚠️ **That judgement was wrong, and a
+foreign reader found exactly what it would have said.** It now ranks integers
+numerically and components by ordinal across both fields.
+
+Its discriminator guard is **per field**, not overall: ⚠️ an overall count of two
+is satisfied by two discriminators in one field and none in the other — **which
+is the precise state this repository was in.**
+
+`vectors_digest` moves to `fnv1a64-45447bbf4e06e6fa`; the array gained two
+members.
+
 ## [kiss-vulkan-vocab 0.4.4] — 2026-09-06
 
 ### Fixed — `tuple_sort_key` said LEXICOGRAPHIC and the vocabulary sorts by ORDINAL
