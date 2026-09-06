@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [kiss-vulkan-vocab 0.4.3] — 2026-09-06
+
+### Fixed — nothing said the angle brackets were placeholders
+
+Several values carry `<...>` — `digest_marker` (`fnv1a64-<hex16>`),
+`unnamed_component_escape` (`x<n>`), `empty_set_spelling` (`<prefix>-none`),
+`unnamed_component_escape_order`, and the top-level `grammar` — and **the
+manifest never said the brackets were not literal text.**
+
+⚠️ **Found by baracuda rebuilding `vectors_digest` from the published 0.4.2
+manifest alone.** They read `digest_marker` as a **prefix** rather than a
+template and emitted `fnv1a64-<hex16>-5fb4518c42b73202`. It was the **only**
+error in an otherwise byte-exact reproduction — the hex digits were right first
+try — and the field name argues for their reading: a thing called a *marker*
+sounds like literal text while its value is a format string.
+
+Renaming that one field would have fixed the instance. `declarative.notation`
+states the convention once and governs every value, which is the class. Gated,
+with a positive control asserting real placeholders exist for it to govern —
+a convention statement that outlives the thing it explains is decoration.
+
+### Fixed — the `vectors_digest` pin buried its most important rule in a parenthetical
+
+*"exactly as this manifest renders it"* is the clause that forces a **raw-text**
+read, and a producer that parses and re-serializes emits its own key order and
+whitespace and gets different bytes. It was a parenthetical; it is now the
+opening instruction. The pin also now states that the `note` member's end must
+be found by **JSON string-scanning** rather than by searching for `, `, because
+a note's own prose contains that sequence — baracuda hit this and called it an
+implementation hazard rather than a spec gap, which is right, and it costs one
+sentence to remove.
+
+`vectors_digest` itself is **unchanged** at `fnv1a64-5fb4518c42b73202`: the
+construction's wording moved, the `vectors` array did not.
+
+### Verified
+
+baracuda re-ran their **merged, unmodified** 0.4.1 producer against served
+0.4.2: **13 of 16 pass, and the three failures are exactly `transpose`,
+`subgroup` and `saturating`** — GUESS-7, GUESS-4 and GUESS-5, the three
+vector-closable items, each now caught against the producer that exploited the
+gap. Nothing regressed.
+
+⚠️ And they rebuilt `vectors_digest` from the pinned sentence alone, having
+never seen this code: **`fnv1a64-5fb4518c42b73202`, and their notes-kept control
+matched ours too.** The pin says what it means.
+
+⚠️ **That is not the same claim as "a fresh reader's residue is smaller."** The
+old producer failing proves the manifest now *discriminates* where it could not;
+only a producer written from 0.4.2 alone measures what a reader arriving today
+still has to supply. That run is outstanding, and the digest half already has a
+fresh residue of three, one of them real — this entry.
+
 ## [kiss-vulkan-vocab 0.4.2] — 2026-09-06
 
 ### Added — `vectors_digest`, so a demonstration can go stale (KISS-Classify §6.8-0017)

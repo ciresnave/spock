@@ -826,3 +826,63 @@ fn vectors_digest_is_rebuildable_from_the_pinned_construction() {
          prose fix would silently move the digest."
     );
 }
+
+/// The angle-bracket convention must be STATED, not left to be inferred.
+///
+/// ⚠️ Found by baracuda rebuilding `vectors_digest` from this manifest alone.
+/// They read `digest_marker` — value `fnv1a64-<hex16>` — as a PREFIX rather
+/// than a template and emitted `fnv1a64-<hex16>-5fb4518c42b73202`. It was the
+/// only error in an otherwise byte-exact reproduction, and the field name
+/// argues for their reading: a thing called a MARKER sounds like literal text
+/// while its value is a format string.
+///
+/// Renaming that one field would fix the instance. This gate is the class:
+/// several values carry `<...>` and a reader had nothing telling them the
+/// brackets were not literal. Same shape as `sgdyn` sitting beside `transpose`
+/// unnoticed while `transpose` was being closed.
+#[test]
+fn the_placeholder_notation_is_stated_rather_than_inferred() {
+    let text = committed();
+
+    let notation = between(&text, "\"notation\": \"", "\"").expect(
+        "§6.8-0017: `declarative` carries no `notation`. Several values in this \
+         manifest use `<...>` placeholders, and without a statement of the \
+         convention a reader must infer it — one who infers wrong emits \
+         well-formed bytes that match nothing, which is the failure byte-exact \
+         matching gives no warning about.",
+    );
+    assert!(
+        notation.contains("PLACEHOLDER") && notation.contains("outside the brackets"),
+        "the notation entry {notation:?} does not say both what an \
+         angle-bracketed name IS and what the text around it is. Saying only \
+         the first leaves a reader guessing whether the surrounding characters \
+         are part of the pattern."
+    );
+
+    // ⚠️ Positive control, and it is the whole point of the gate. A convention
+    // statement describing a convention nobody uses is decoration; this asserts
+    // there are real placeholders for it to govern, so the test fails if the
+    // notation outlives the thing it explains.
+    let bracketed = text
+        .lines()
+        .filter(|l| l.contains("\": \"") && l.contains('<') && !l.contains("\"notation\""))
+        .count();
+    assert!(
+        bracketed >= 3,
+        "only {bracketed} manifest values contain `<`, so the notation entry \
+         explains almost nothing. Either the placeholders were removed — in \
+         which case delete the notation with them — or this extractor stopped \
+         finding them, which would let a future manifest drop every placeholder \
+         and still pass."
+    );
+
+    // The field that caused the misreading must be covered by name, because it
+    // is the one whose NAME argues against the convention.
+    assert!(
+        notation.contains("fnv1a64-<hex16>"),
+        "the notation entry {notation:?} does not name `digest_marker`'s value. \
+         That is the field a foreign reader actually got wrong, and a general \
+         rule stated without the instance it exists for is the easiest kind to \
+         read past."
+    );
+}

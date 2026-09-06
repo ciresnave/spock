@@ -3,7 +3,7 @@
   "namespace": "vulkan",
   "vocabulary_version": 5,
   "vectors_digest": "fnv1a64-5fb4518c42b73202",
-  "generated_from": "kiss-vulkan-vocab 0.4.2 (examples/emit_vocabulary_manifest.rs)",
+  "generated_from": "kiss-vulkan-vocab 0.4.3 (examples/emit_vocabulary_manifest.rs)",
   "kind": "generated",
   "grammar": "vulkan:<subgroup>.<ops>.<arith>.<coop>.<coopvec>",
   "coverage_note": "What this manifest does and does not pin. The DECLARATIVE half suffices to PARSE a `vulkan:` token — field count, separators, alphabets, component spellings, the unnamed escape, and the digest marker. It does NOT suffice to PRODUCE one. Two of the five fields, <coop> and <coopvec>, choose their encoding by a LENGTH-CONDITIONAL switch: above 512 bytes the canonical enumeration is replaced by the FNV-1a-64 digest of that same string. No alphabet or regex expresses that, so a consumer binding only against `grammar` can recognise every token and still emit the wrong one — and under KISS-CLASSIFY-6.8-0002 byte-exact matching a wrong token is a DIFFERENT CELL, not a degraded answer, so it surfaces as a silent cache miss rather than an error. The `vectors` array is therefore the normative contract for producers (6.8-0013). It pins canonical ORDER, DEDUP, both length-conditional THRESHOLDS at and immediately across 512 bytes, and the exact DIGEST_INPUT byte string measured against each — so a producer may disagree about WHETHER to digest but never about WHAT is digested. This namespace has two length-conditional fields, so `threshold` and `digest_input` are present per-field rather than omitted, and they are pinned SEPARATELY because the fields switch on their own bytes and never together. NOT pinned here: which tokens a given device admits. That is a deriver's job and needs a driver, which 6.9-0003 forbids requiring of a token producer — the token names a CHOSEN specialization, so one device yields a set of valid tokens rather than one. Also not claimed: currency. This records the vocabulary version its bytes were generated against, and a stamp proves BINDING, not CURRENCY.",
@@ -12,6 +12,7 @@
     "note": "A byte-identical reproduction of the TWELVE-vector 0.4.1 manifest was performed by baracuda from the manifest alone. This manifest has 16, the extra ones added because of that reproduction, so what ships here is not what was reproduced. Recorded as unexercised rather than carried forward: §6.8-0013 makes the vectors array the normative contract, and it moved. A re-run against this artifact is the remedy, and its value is the `guessed` list, not the pass."
   },
   "declarative": {
+    "notation": "An angle-bracketed name is a PLACEHOLDER for a value, never literal text: `fnv1a64-<hex16>` means the marker `fnv1a64-` followed by sixteen hex digits, not a string containing `<hex16>`. This applies to every value in this manifest, including `grammar`. Text outside the brackets is literal.",
     "field_count": 5,
     "field_separator": ".",
     "tuple_separator": "-",
@@ -28,7 +29,7 @@
     "digest_encoding": "UTF-8 bytes of the enumeration string",
     "digest_hex": "lowercase, zero-padded to exactly 16 digits",
     "unnamed_component_escape_order": "numeric on <n>, not lexicographic",
-    "vectors_digest_input": "Concatenate, in `vectors` array order, each element's JSON text exactly as this manifest renders it (surrounding whitespace and any trailing comma removed), with its `note` member and the `, ` separating it deleted, each followed by U+000A. Digest the UTF-8 bytes using the algorithm and constants above. Defined over whatever members an element actually carries, never a fixed template: a `digest_input` vector carries no `token` at all.",
+    "vectors_digest_input": "Take each element of `vectors` AS RAW TEXT, exactly as this manifest renders it -- do NOT parse and re-serialize it, because a producer that re-serializes emits its own key order and whitespace and gets different bytes. Trim surrounding whitespace and any trailing comma. Delete the element's `note` member and the `, ` separating it, locating the member's end by JSON string-scanning rather than by searching for `, `, since a note's own prose contains that sequence. Concatenate the results in array order, each followed by U+000A, and digest the UTF-8 bytes using the algorithm and constants above. Defined over whatever members an element actually carries, never a fixed template: a `digest_input` vector carries no `token` at all.",
     "digest_threshold_bytes": 512
   },
   "field_spec": [
