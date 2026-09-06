@@ -317,31 +317,23 @@ fn emit_field_spec(o: &mut String) {
 // Vectors — the normative contract (§6.8-0013).
 // ---------------------------------------------------------------------------
 
-/// The vectors that pin a FLAG or a NON-NUMERIC spelling.
+/// The `transpose` flag, which nothing pinned before.
 ///
-/// ⚠️ Grouped because they share a failure mode, not because they share a
-/// field. Each one pins something that is USUALLY ABSENT from a sample:
-/// `transpose` and `saturating` were false in every shape the vocabulary had
-/// ever enumerated, `sgdyn` is the one `<subgroup>` spelling that is not a
-/// number, and the tie-break only exists when two shapes collide on m, n, k.
-///
-/// A flag that is usually absent is exactly what a sample omits, and all four
-/// were found by a foreign party reproducing this manifest — not here.
-fn flag_vectors() -> Vec<String> {
-    // ⚠️ The TRANSPOSE flag, which nothing pinned before.
-    //
-    // `field_spec` describes it -- "five component types plus a transpose flag"
-    // -- and `field_spec` is the half §6.8-0013 calls DOCUMENTATION. All 56
-    // combos across the other vectors carry `transpose: false`, so the half
-    // §6.8-0013 calls the NORMATIVE CONTRACT never showed that it existed.
-    //
-    // Found by baracuda reproducing this manifest from scratch: they emitted all
-    // twelve vectors byte-identically WITHOUT ever producing a `-t` suffix,
-    // because no vector demanded one. Their pass and their blindness had the
-    // same cause, and neither was visible from the score.
-    //
-    // A flag that is usually absent is exactly what a sample omits.
-    let mut v = vec![coopvec_vector(
+// ⚠️ The TRANSPOSE flag, which nothing pinned before.
+//
+// `field_spec` describes it -- "five component types plus a transpose flag"
+// -- and `field_spec` is the half §6.8-0013 calls DOCUMENTATION. All 56
+// combos across the other vectors carry `transpose: false`, so the half
+// §6.8-0013 calls the NORMATIVE CONTRACT never showed that it existed.
+//
+// Found by baracuda reproducing this manifest from scratch: they emitted all
+// twelve vectors byte-identically WITHOUT ever producing a `-t` suffix,
+// because no vector demanded one. Their pass and their blindness had the
+// same cause, and neither was visible from the score.
+//
+// A flag that is usually absent is exactly what a sample omits.
+fn transpose_vector() -> String {
+    coopvec_vector(
         "transpose",
         "A transposing cooperative-vector combination beside a non-transposing one. Pins that `transpose` is spelled as a trailing `-t` rather than as a sixth component type, and that a clear flag costs nothing: the two combos differ ONLY in the flag, so the suffix is the only difference between their spellings.",
         &[
@@ -351,46 +343,54 @@ fn flag_vectors() -> Vec<String> {
             },
             combo(1),
         ],
-    )];
+    )
+}
 
-    // ⚠️ SUBGROUP, whose DYNAMIC spelling no vector reached.
-    //
-    // Same shape as `transpose` immediately above, and sitting right beside
-    // it: `field_spec` describes width-agnostic compilation, and all twelve
-    // original vectors passed an INTEGER width, so `sgdyn` existed only in the
-    // half §6.8-0013 calls documentation. Closing `transpose` without sweeping
-    // for its shape left the sibling in place — the fix was per-instance and
-    // the defect was per-class.
-    //
-    // The gap is specifically the INPUT representation: a reader who has only
-    // ever seen `"subgroup": 32` cannot know what a producer passes to ask for
-    // the dynamic case, so this vector pins the input spelling and the token
-    // together.
-    v.push(subgroup_vector(
+/// The one `<subgroup>` spelling that is not a number.
+///
+// ⚠️ SUBGROUP, whose DYNAMIC spelling no vector reached.
+//
+// Same shape as `transpose` immediately above, and sitting right beside
+// it: `field_spec` describes width-agnostic compilation, and all twelve
+// original vectors passed an INTEGER width, so `sgdyn` existed only in the
+// half §6.8-0013 calls documentation. Closing `transpose` without sweeping
+// for its shape left the sibling in place — the fix was per-instance and
+// the defect was per-class.
+//
+// The gap is specifically the INPUT representation: a reader who has only
+// ever seen `"subgroup": 32` cannot know what a producer passes to ask for
+// the dynamic case, so this vector pins the input spelling and the token
+// together.
+fn dynamic_subgroup_vector() -> String {
+    subgroup_vector(
         "subgroup",
         "Width-agnostic compilation. Pins BOTH that the dynamic case spells \
         `sgdyn` rather than a width, AND that its input is the string `dynamic` \
         rather than a number, a null, or an absent field — which no vector \
         passing an integer width could ever show.",
-    ));
+    )
+}
 
-    // ⚠️ SATURATING, absent from BOTH halves of the manifest — worse than
-    // `transpose`, which at least `field_spec` described.
-    //
-    // Reported by baracuda as "`saturating` is not spelled into the coop
-    // tuple". That conclusion is wrong — it spells a trailing `-sat`,
-    // measured — but the REASONING was sound and the action it called for was
-    // right: they observed that all twelve vectors carry `saturating: false`,
-    // so a producer that appended the field would still match every one. That
-    // holds whether the suffix exists or not, which is exactly why the vectors
-    // could not answer it.
-    //
-    // ⚠️ And nothing in the prose could have corrected them: `field_spec`
-    // said "M-N-K plus four component types" and stopped, so the suffix
-    // appeared in NO vector and NO description. A reader building a producer
-    // from this manifest could not have emitted `-sat` by any route. The prose
-    // is fixed above; this vector fixes the normative half.
-    v.push(coop_vector(
+/// The `-sat` suffix, which was in neither half of the manifest.
+///
+// ⚠️ SATURATING, absent from BOTH halves of the manifest — worse than
+// `transpose`, which at least `field_spec` described.
+//
+// Reported by baracuda as "`saturating` is not spelled into the coop
+// tuple". That conclusion is wrong — it spells a trailing `-sat`,
+// measured — but the REASONING was sound and the action it called for was
+// right: they observed that all twelve vectors carry `saturating: false`,
+// so a producer that appended the field would still match every one. That
+// holds whether the suffix exists or not, which is exactly why the vectors
+// could not answer it.
+//
+// ⚠️ And nothing in the prose could have corrected them: `field_spec`
+// said "M-N-K plus four component types" and stopped, so the suffix
+// appeared in NO vector and NO description. A reader building a producer
+// from this manifest could not have emitted `-sat` by any route. The prose
+// is fixed above; this vector fixes the normative half.
+fn saturating_vector() -> String {
+    coop_vector(
         "saturating",
         "Two shapes differing ONLY in `saturating`, one true and one false. The \
          saturating one takes a trailing `-sat` and the two remain SEPARATE \
@@ -405,19 +405,23 @@ fn flag_vectors() -> Vec<String> {
             },
             big_shape(1),
         ],
-    ));
+    )
+}
 
-    // ⚠️ The TIE-BREAK FIELD ORDER, for shapes agreeing on m, n and k.
-    //
-    // The only duplicate-bearing vector is `dedup`, whose repeated shapes are
-    // IDENTICAL — they exercise deduplication and say nothing about ordering,
-    // because collapsing them needs no comparison beyond equality. Nothing
-    // pinned what happens when two DISTINCT shapes tie on the dimensions.
-    //
-    // These two swap `a` and `b`, so the field order is what decides: under
-    // (a, b, c, result) the f16-first shape sorts first; under (b, a, ...) the
-    // other does. A vector where only one field varies cannot separate the two.
-    v.push(coop_vector(
+/// The tie-break for shapes agreeing on m, n and k.
+///
+// ⚠️ The TIE-BREAK FIELD ORDER, for shapes agreeing on m, n and k.
+//
+// The only duplicate-bearing vector is `dedup`, whose repeated shapes are
+// IDENTICAL — they exercise deduplication and say nothing about ordering,
+// because collapsing them needs no comparison beyond equality. Nothing
+// pinned what happens when two DISTINCT shapes tie on the dimensions.
+//
+// These two swap `a` and `b`, so the field order is what decides: under
+// (a, b, c, result) the f16-first shape sorts first; under (b, a, ...) the
+// other does. A vector where only one field varies cannot separate the two.
+fn tiebreak_vector() -> String {
+    coop_vector(
         "tiebreak",
         "Two distinct shapes agreeing on m, n and k, given in non-canonical \
          order, differing by a SWAP of `a` and `b`. Pins that the tie-break \
@@ -436,29 +440,44 @@ fn flag_vectors() -> Vec<String> {
                 ..big_shape(1)
             },
         ],
-    ));
-
-    v
+    )
 }
 
-/// Build the vector list.
+/// The vectors that pin a FLAG or a NON-NUMERIC spelling.
 ///
-/// Split from the printing so the COUNT is available to `sufficiency`,
-/// which is emitted earlier in the file and previously spelled the number
-/// out by hand.
-fn build_vectors() -> Vec<String> {
-    let mut v: Vec<String> = Vec::new();
+/// ⚠️ Grouped because they share a failure mode, not because they share a
+/// field. Each one pins something that is USUALLY ABSENT from a sample:
+/// `transpose` and `saturating` were false in every shape the vocabulary had
+/// ever enumerated, `sgdyn` is the one `<subgroup>` spelling that is not a
+/// number, and the tie-break only exists when two shapes collide on m, n, k.
+///
+/// A flag that is usually absent is exactly what a sample omits, and all four
+/// were found by a foreign party reproducing this manifest — not here.
+fn flag_vectors() -> Vec<String> {
+    vec![
+        transpose_vector(),
+        dynamic_subgroup_vector(),
+        saturating_vector(),
+        tiebreak_vector(),
+    ]
+}
 
+/// The `order` and `dedup` vectors, for both length-conditional fields.
+///
+/// Pinned separately per field because the two canonicalize independently:
+/// an implementation that sorted one and not the other would pass a
+/// `<coop>`-only vector set.
+fn order_and_dedup_vectors() -> Vec<String> {
     // -- order: a non-canonically-ordered input and its canonical output.
     let unsorted = vec![big_shape(3), big_shape(1), big_shape(2)];
-    v.push(coop_vector(
+    let mut v = vec![coop_vector(
         "order",
         "Shapes presented in non-canonical order. A producer that emitted \
          driver order would differ from an honest peer on the same device, and \
          under byte-exact matching that is a different cell rather than a \
          degraded answer.",
         &unsorted,
-    ));
+    )];
 
     // -- dedup: a duplicate-bearing input and its deduped output.
     let dupes = vec![big_shape(1), big_shape(2), big_shape(1), big_shape(2)];
@@ -487,12 +506,15 @@ fn build_vectors() -> Vec<String> {
         &cv_dupes,
     ));
 
-    v.extend(flag_vectors());
+    v
+}
 
+/// The two SET-VALUED scalar fields, `<ops>` and `<arith>`.
+fn set_field_vectors() -> Vec<String> {
     // -- the two SET-VALUED scalar fields. Nothing pinned these before: every
     //    vector above carries `ops-none` and `arith-none`, so a consumer could
     //    read the alphabet and still not know how two members are joined.
-    v.push(set_field_vector(
+    let mut v = vec![set_field_vector(
         "arith",
         "Two arithmetic capabilities, given in NON-CANONICAL order. Pins that \
          `<arith>` joins its names with `-` and never juxtaposes them, and that \
@@ -501,7 +523,7 @@ fn build_vectors() -> Vec<String> {
          `arith-i8-f16` is a different cell, not a differently-written same cell.",
         OpClasses::NONE,
         Arith::FLOAT16 | Arith::INT8,
-    ));
+    )];
     v.push(set_field_vector(
         "ops",
         "Three operation classes, given in NON-CANONICAL order. Pinned \
@@ -513,6 +535,13 @@ fn build_vectors() -> Vec<String> {
         OpClasses::BASIC | OpClasses::BALLOT | OpClasses::ROTATE,
         Arith::NONE,
     ));
+
+    v
+}
+
+/// `threshold` and `digest_input`, per field, at and immediately across.
+fn threshold_vectors() -> Vec<String> {
+    let mut v: Vec<String> = Vec::new();
 
     // -- threshold + digest_input, per field, at and immediately across.
     match find_coop_at_and_across() {
@@ -544,6 +573,19 @@ fn build_vectors() -> Vec<String> {
         ),
     }
 
+    v
+}
+
+/// Build the vector list.
+///
+/// Split from the printing so the COUNT is available to `sufficiency`,
+/// which is emitted earlier in the file and previously spelled the number
+/// out by hand.
+fn build_vectors() -> Vec<String> {
+    let mut v = order_and_dedup_vectors();
+    v.extend(flag_vectors());
+    v.extend(set_field_vectors());
+    v.extend(threshold_vectors());
     v
 }
 

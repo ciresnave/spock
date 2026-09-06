@@ -499,6 +499,25 @@ fn sufficiency_is_declared_per_6_8_0017() {
             );
         }
     }
+}
+
+/// The `sufficiency` note must name the vector count this manifest carries.
+///
+/// Lifted out of `sufficiency_is_declared_per_6_8_0017` rather than left as a
+/// fourth arm: that test already carried three arms about the SHAPE of the
+/// block, and this one is about its CONTENT agreeing with the rest of the
+/// file. A failure in either should name which of the two went wrong.
+#[test]
+fn the_sufficiency_note_names_the_manifests_own_vector_count() {
+    let text = std::fs::read_to_string(committed_path()).expect("committed manifest");
+    let start = text
+        .find("\"sufficiency\"")
+        .expect("§6.8-0017: `sufficiency` is absent");
+    let block: String = text[start..]
+        .lines()
+        .take_while(|l| !l.trim_start().starts_with("},"))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     // Arm 4: the note must NAME the vector count this manifest actually carries.
     //
@@ -534,11 +553,10 @@ fn sufficiency_is_declared_per_6_8_0017() {
     );
 }
 
-/// The three vectors closing baracuda's residue pin SPELLINGS, and a note that
-/// describes a spelling is prose until something compares it to the token.
+/// Shared by the three vectors that pin a spelling nothing had produced.
 ///
-/// ⚠️ Written because the first draft of the `saturating` note asserted the
-/// OPPOSITE of what this vocabulary does. It claimed `saturating` was not
+/// ⚠️ These exist because the first draft of the `saturating` note asserted
+/// the OPPOSITE of what this vocabulary does. It claimed `saturating` was not
 /// spelled into the tuple and that two shapes differing only in that field
 /// would collapse into one; the emitted token spells a trailing `-sat` and
 /// keeps both. The note was wrong for the same reason the gap existed — no
@@ -548,42 +566,44 @@ fn sufficiency_is_declared_per_6_8_0017() {
 /// A vector is self-consistent BY CONSTRUCTION here: the emitter derives the
 /// token from the same code that spells it, so input and token can never
 /// disagree. That is deliberate, and it is also why a vector cannot catch a
-/// wrong NOTE. This test is the only thing standing between the two halves.
+/// wrong NOTE. These tests are the only thing standing between the halves.
+fn vector_line(pins: &str) -> String {
+    committed()
+        .lines()
+        .find(|l| l.contains(&format!("\"pins\": \"{pins}\"")))
+        .unwrap_or_else(|| {
+            panic!(
+                "no vector pins {pins:?}. This is the ABSENT arm: the test \
+                 cannot check a spelling that no vector produces, and a \
+                 silently-skipped check is what let the wrong note ship."
+            )
+        })
+        .to_string()
+}
+
+fn vector_token(pins: &str) -> String {
+    let line = vector_line(pins);
+    between(&line, "\"token\": \"", "\"")
+        .unwrap_or_else(|| panic!("vector {pins:?} carries no token"))
+        .to_string()
+}
+
+/// The `<coop>` tuples of a vector's token, split on `,`.
+fn coop_tuples(pins: &str) -> Vec<String> {
+    let token = vector_token(pins);
+    token
+        .split('.')
+        .find(|p| p.starts_with("cm-"))
+        .unwrap_or_else(|| panic!("token {token:?} has no <coop> field"))
+        .trim_start_matches("cm-")
+        .split(',')
+        .map(str::to_string)
+        .collect()
+}
+
 #[test]
-fn flag_vectors_pin_the_spellings_their_notes_describe() {
-    let m = committed();
-
-    let line_for = |pins: &str| -> String {
-        m.lines()
-            .find(|l| l.contains(&format!("\"pins\": \"{pins}\"")))
-            .unwrap_or_else(|| {
-                panic!(
-                    "no vector pins {pins:?}. This is the ABSENT arm: the test \
-                     cannot check a spelling that no vector produces, and a \
-                     silently-skipped check is what let the wrong note ship."
-                )
-            })
-            .to_string()
-    };
-    let token_for = |pins: &str| -> String {
-        let line = line_for(pins);
-        between(&line, "\"token\": \"", "\"")
-            .unwrap_or_else(|| panic!("vector {pins:?} carries no token"))
-            .to_string()
-    };
-    let coop_tuples = |token: &str| -> Vec<String> {
-        token
-            .split('.')
-            .find(|p| p.starts_with("cm-"))
-            .unwrap_or_else(|| panic!("token {token:?} has no <coop> field"))
-            .trim_start_matches("cm-")
-            .split(',')
-            .map(str::to_string)
-            .collect()
-    };
-
-    // -- subgroup: the dynamic width, in the TOKEN and in the INPUT.
-    let sg = token_for("subgroup");
+fn the_subgroup_vector_pins_the_dynamic_spelling() {
+    let sg = vector_token("subgroup");
     assert!(
         sg.starts_with("vulkan:sgdyn."),
         "the subgroup vector's token is {sg:?}, which does not spell `sgdyn`. \
@@ -591,15 +611,17 @@ fn flag_vectors_pin_the_spellings_their_notes_describe() {
          not a number, so a token carrying a width here pins nothing new."
     );
     assert!(
-        line_for("subgroup").contains("\"subgroup\": \"dynamic\""),
+        vector_line("subgroup").contains("\"subgroup\": \"dynamic\""),
         "the subgroup vector's INPUT does not spell the dynamic case as the \
          string \"dynamic\". The gap this vector closes is in the input half — \
          a reader who has only seen `\"subgroup\": 32` cannot know what to pass \
          — so an input spelled any other way leaves the gap open."
     );
+}
 
-    // -- saturating: spelled as a trailing `-sat`, and NOT collapsed.
-    let tuples = coop_tuples(&token_for("saturating"));
+#[test]
+fn the_saturating_vector_pins_the_sat_suffix() {
+    let tuples = coop_tuples("saturating");
     assert_eq!(
         tuples.len(),
         2,
@@ -617,9 +639,11 @@ fn flag_vectors_pin_the_spellings_their_notes_describe() {
          all; two markers or none would both mean the flag is not what \
          distinguishes them."
     );
+}
 
-    // -- tiebreak: shapes agreeing on m,n,k order on (a, b, c, result).
-    let tuples = coop_tuples(&token_for("tiebreak"));
+#[test]
+fn the_tiebreak_vector_pins_the_field_order() {
+    let tuples = coop_tuples("tiebreak");
     assert_eq!(
         tuples.len(),
         2,
