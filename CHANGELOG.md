@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [kiss-vulkan-vocab 0.4.6] — 2026-09-06
+
+### Added — the two orderings no vector can ever test
+
+⚠️ **`ops_alphabet` and `arith_names` are THEMSELVES in lexicographic order**, so
+no input — however chosen — can distinguish *"sort by the declared array's
+index"* from *"sort the spellings as text"* for those fields. **A producer
+implementing the wrong rule passes every vector that could ever be written.**
+
+`component_types` is **not** alphabetical (`f64` precedes `bf16`; four adjacent
+pairs disagree) and **is** discriminable — which is exactly why it is the field
+that produced two ordering defects and now carries two deliberate vectors.
+⚠️ **The field that was testable is the field that got tested; the two that were
+not, were not, and nothing said so.**
+
+Found by baracuda against published 0.4.5.
+
+**This is a third category.** An unstated rule is *undiscriminated*; an
+incidentally-witnessed one is *fragile*; this one is **stated, right, and
+unfalsifiable** — the corpus cannot test it even in principle. It is this
+repository's own banked rule pointed one level up: *a machine-checkable value
+that is wrong is a bug; an unfalsifiable value that is right is a worse bug.*
+Here the **value** is right and the **rule about it** is unfalsifiable.
+
+⚠️ **And unlike a fragility, it has a TRIGGER.** It activates the day either
+array stops being alphabetical — add an op class whose letter is appended rather
+than inserted, and every text-sorting producer silently diverges from every
+index-sorting one. **The corpus was built while the two rules agreed, so it
+carries no memory of the distinction and will not object.**
+
+`the_alphabets_that_cannot_discriminate_their_own_order_still_coincide` fires at
+exactly that moment, and says what to do about it. Its own control is
+`component_types` **not** coinciding: if every array were sorted, the comparison
+would distinguish nothing and its passing would mean nothing.
+
+`coverage_note` states the limit for foreign readers, since a gate in this
+repository is invisible to them — and a reader whose producer passes every
+vector is entitled to know which of their choices that does **not** vouch for.
+
+`vectors_digest` is unchanged: `coverage_note` is not part of the `vectors`
+array.
+
 ## [kiss-vulkan-vocab 0.4.5] — 2026-09-06
 
 ### Fixed — the sort rule reached the components and never the DIMENSIONS
