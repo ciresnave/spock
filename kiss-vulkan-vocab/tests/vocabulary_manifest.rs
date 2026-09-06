@@ -242,7 +242,19 @@ fn vectors_cover_every_canonicalization_the_clause_requires() {
 
     // Both length-conditional fields, both sides of the boundary, both digests.
     for field in ["coop", "coopvec"] {
-        let count = m.match_indices(&format!("\"field\": \"{field}\"")).count();
+        // ⚠️ Counts BOTH spellings. A threshold vector names its field with
+        // `threshold_of` (KISS-CLASSIFY-6.8-0016, merged 2026-09-06); every other
+        // vector kind still uses `field`, because `threshold_of` on a vector that
+        // pins no boundary would be a category error.
+        //
+        // This test broke the moment that rename landed, which is the point worth
+        // recording: it is a READER KEYED ON THE OLD NAME, in the same repository
+        // as the emitter, and nothing connected the two but a string. That is the
+        // failure mode the clause rename exists to prevent between projects,
+        // reproduced inside one crate within minutes.
+        let count = m.match_indices(&format!("\"field\": \"{field}\"")).count()
+            + m.match_indices(&format!("\"threshold_of\": \"{field}\""))
+                .count();
         assert!(
             count >= 5,
             "field {field:?} has only {count} vectors; expected at least five \
@@ -322,4 +334,91 @@ fn between<'a>(hay: &'a str, start: &str, end: &str) -> Option<&'a str> {
     let rest = &hay[s..];
     let e = rest.find(end)?;
     Some(&rest[..e])
+}
+
+/// The committed manifest must satisfy KISS-CLASSIFY-6.8-0016's own rejection
+/// conditions, checked here rather than trusted.
+///
+/// §6.8-0016 (merged 2026-09-06) requires that a `threshold`-tagged vector carry
+/// `threshold_of` and `enumeration_bytes`, and that **a reader MUST reject** a
+/// manifest in which, for any value of `threshold_of`, the threshold vectors do
+/// not include a pair whose `enumeration_bytes` are N and N+1, **or** in which
+/// that pair's two emitted `token` values are equal.
+///
+/// ⚠️ This asserts the conditions a KISS reader will apply to us, from our side,
+/// so a divergence fails here rather than in somebody else's decline. The clause
+/// exists because **adjacency does not establish straddling** — enumerations of
+/// 3 and 4 bytes are adjacent and both far below a 512-byte boundary — and the
+/// differing-token condition is what makes the byte pair mean anything: a
+/// declared boundary that flips no behaviour is a wrong boundary.
+///
+/// Hand-parsed: this crate has no dependencies, dev-dependencies included, which
+/// §6.9-0003 requires and `zero_dependency.rs` enforces.
+#[test]
+fn threshold_vectors_straddle_their_boundary_per_6_8_0016() {
+    let text = std::fs::read_to_string(committed_path()).expect("committed manifest");
+
+    fn field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+        let at = line.find(&format!("\"{key}\": "))? + key.len() + 4;
+        let rest = &line[at..];
+        Some(if let Some(r) = rest.strip_prefix('"') {
+            &r[..r.find('"')?]
+        } else {
+            let end = rest.find([',', '}']).unwrap_or(rest.len());
+            rest[..end].trim()
+        })
+    }
+
+    let rows: Vec<(&str, u64, &str)> = text
+        .lines()
+        .filter(|l| l.contains("\"pins\": \"threshold\""))
+        .map(|l| {
+            let of = field(l, "threshold_of").unwrap_or_else(|| {
+                panic!(
+                    "a threshold vector without `threshold_of`; §6.8-0016 makes it MUST: {l:.120}"
+                )
+            });
+            let bytes: u64 = field(l, "enumeration_bytes")
+                .unwrap_or_else(|| panic!("threshold vector without `enumeration_bytes`: {l:.120}"))
+                .parse()
+                .expect("enumeration_bytes is a number");
+            let token = field(l, "token")
+                .unwrap_or_else(|| panic!("threshold vector without `token`: {l:.120}"));
+            (of, bytes, token)
+        })
+        .collect();
+
+    // Positive control: a parser that silently matched nothing would satisfy
+    // every assertion below by having nothing to check.
+    assert!(
+        rows.len() >= 2,
+        "found {} threshold vectors; the manifest has length-conditional fields, so \
+         too few means the parser broke rather than the manifest shrank",
+        rows.len()
+    );
+
+    let mut fields: Vec<&str> = rows.iter().map(|(f, _, _)| *f).collect();
+    fields.sort_unstable();
+    fields.dedup();
+    for f in fields {
+        let mut group: Vec<&(&str, u64, &str)> = rows.iter().filter(|(o, _, _)| *o == f).collect();
+        group.sort_by_key(|(_, b, _)| *b);
+        let pair = group
+            .windows(2)
+            .find(|w| w[1].1 == w[0].1 + 1)
+            .unwrap_or_else(|| {
+                panic!(
+                    "threshold_of={f:?} has no N/N+1 pair; byte counts are {:?}. \
+                     Adjacency in the LIST is not adjacency in the BYTES -- a reader \
+                     MUST reject this under §6.8-0016.",
+                    group.iter().map(|(_, b, _)| *b).collect::<Vec<_>>()
+                )
+            });
+        assert_ne!(
+            pair[0].2, pair[1].2,
+            "threshold_of={f:?}: the N/N+1 pair at {} and {} emits the SAME token, so the \
+             declared boundary flips nothing and is a wrong boundary",
+            pair[0].1, pair[1].1
+        );
+    }
 }

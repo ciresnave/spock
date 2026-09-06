@@ -627,7 +627,7 @@ fn coop_threshold_vector(pins: &str, note: &str, shapes: &[CoopShape]) -> String
     let token = token_of(CoopMatrix::from_shapes(shapes.to_vec()), CoopVector::None);
     let measured = measured_coop_enumeration(shapes);
     format!(
-        "{{ \"pins\": \"{}\", \"field\": \"coop\", \"note\": \"{}\", \"enumeration_bytes\": {}, \"threshold_bytes\": {}, \"input\": {{ \"subgroup\": 32, \"ops\": [], \"arith\": [], \"coop\": [{}], \"coopvec\": [] }}, \"token\": \"{}\" }}",
+        "{{ \"pins\": \"{}\", \"threshold_of\": \"coop\", \"note\": \"{}\", \"enumeration_bytes\": {}, \"threshold_bytes\": {}, \"input\": {{ \"subgroup\": 32, \"ops\": [], \"arith\": [], \"coop\": [{}], \"coopvec\": [] }}, \"token\": \"{}\" }}",
         pins,
         esc(note),
         measured.len(),
@@ -641,7 +641,7 @@ fn coopvec_threshold_vector(pins: &str, note: &str, combos: &[CoopVecCombo]) -> 
     let token = token_of(CoopMatrix::None, CoopVector::from_combos(combos.to_vec()));
     let measured = measured_coopvec_enumeration(combos);
     format!(
-        "{{ \"pins\": \"{}\", \"field\": \"coopvec\", \"note\": \"{}\", \"enumeration_bytes\": {}, \"threshold_bytes\": {}, \"input\": {{ \"subgroup\": 32, \"ops\": [], \"arith\": [], \"coop\": [], \"coopvec\": [{}] }}, \"token\": \"{}\" }}",
+        "{{ \"pins\": \"{}\", \"threshold_of\": \"coopvec\", \"note\": \"{}\", \"enumeration_bytes\": {}, \"threshold_bytes\": {}, \"input\": {{ \"subgroup\": 32, \"ops\": [], \"arith\": [], \"coop\": [], \"coopvec\": [{}] }}, \"token\": \"{}\" }}",
         pins,
         esc(note),
         measured.len(),
