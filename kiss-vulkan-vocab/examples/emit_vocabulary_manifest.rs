@@ -94,6 +94,56 @@ pub fn manifest() -> String {
     .unwrap();
     writeln!(o, "  \"coverage_note\": \"{}\",", esc(COVERAGE_NOTE)).unwrap();
 
+    // KISS-CLASSIFY-6.8-0017: a manifest MUST carry a `sufficiency` object with
+    // a `status` of exactly `demonstrated` or `unexercised`. `unexercised` is
+    // DECLARED, never inferred from absence -- an absent field cannot be told
+    // apart from a forgotten one.
+    //
+    // ⚠️ THIS SAYS `unexercised` DESPITE A REAL DEMONSTRATION HAVING HAPPENED,
+    // and the reason is the whole point of the field.
+    //
+    // Baracuda reproduced all TWELVE vectors of the 0.4.1 manifest
+    // byte-identically from the manifest alone -- they extracted it, deleted the
+    // archive so this source was physically unreachable, used no docs.rs and
+    // asked nothing -- and listed what they had to supply from outside. That was
+    // the first §5.3-condition-2-shaped demonstration anywhere in the suite.
+    //
+    // But this manifest has THIRTEEN vectors. The 13th pins `transpose`, added
+    // BECAUSE of that reproduction. So the artifact published here is not the
+    // artifact that was reproduced, and `demonstrated` would assert a run
+    // against a vector set that did not exist when the run happened.
+    //
+    // §6.8-0013 makes the `vectors` array the normative contract, and a vector
+    // set can change without `vocabulary_version` changing: adding a vector
+    // documents a token that was ALREADY legal -- `CoopVecCombo::spell` has
+    // emitted `-t` since before any of this. The LANGUAGE did not move; the
+    // CONTRACT did. §6.8-0017's currency check keys on `vocabulary_version`, so
+    // a literal reading would have let `demonstrated` carry forward.
+    //
+    // Declining what the clause would have allowed, on the clause's own
+    // principle: claiming a demonstration on the strength of a run against a
+    // different contract is the flattering inference the `derived` array exists
+    // to stop, one level up. The remedy is a re-run against what actually
+    // ships, which tests whether the fixes closed the guesses -- a re-assertion
+    // cannot.
+    writeln!(o, "  \"sufficiency\": {{").unwrap();
+    writeln!(o, "    \"status\": \"unexercised\",").unwrap();
+    writeln!(
+        o,
+        "    \"note\": \"{}\"",
+        esc(
+            "A byte-identical reproduction of the TWELVE-vector 0.4.1 manifest was performed by \
+             baracuda from the manifest alone. This manifest has thirteen; the additional vector \
+             pins `transpose` and was added because of that reproduction, so what ships here is \
+             not what was reproduced. Recorded as unexercised rather than carried forward: \
+             §6.8-0013 makes the vectors array the normative contract, and it moved. A re-run \
+             against this artifact is the remedy, and its value is the `guessed` list, not the \
+             pass."
+        )
+    )
+    .unwrap();
+    writeln!(o, "  }},").unwrap();
+
     emit_declarative(&mut o);
     emit_field_spec(&mut o);
     emit_vectors(&mut o);

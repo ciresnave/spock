@@ -422,3 +422,81 @@ fn threshold_vectors_straddle_their_boundary_per_6_8_0016() {
         );
     }
 }
+
+/// The manifest must satisfy KISS-CLASSIFY-6.8-0017's rejection conditions,
+/// checked here rather than trusted.
+///
+/// A reader MUST reject a manifest whose `sufficiency` is absent, whose
+/// `status` is **absent** or is any other token, or which claims `demonstrated`
+/// without all five of `reproduced_by`, `artifact`, `vocabulary_version`,
+/// `guessed` and `derived`.
+///
+/// ⚠️ The absent-`status` arm is checked SEPARATELY from the wrong-token arm,
+/// mirroring the clause's own reason for stating them separately: an
+/// enumeration of wrong values does not reach a value that is not there. That
+/// distinction is not pedantry — it is how §6.8-0017 came to mandate a field it
+/// never named, and the clause says so about itself.
+///
+/// Hand-parsed: this crate has no dependencies, dev-dependencies included.
+#[test]
+fn sufficiency_is_declared_per_6_8_0017() {
+    let text = std::fs::read_to_string(committed_path()).expect("committed manifest");
+
+    let start = text
+        .find("\"sufficiency\"")
+        .expect("§6.8-0017: `sufficiency` is absent. A reader MUST reject this.");
+    let block: String = text[start..]
+        .lines()
+        .take_while(|l| !l.trim_start().starts_with("},"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    // Positive control: a slice that captured nothing would satisfy an
+    // absence-based check by having nothing to contradict it.
+    assert!(
+        block.len() > 30 && block.contains('{'),
+        "the sufficiency block did not parse out ({block:?}); the extractor broke \
+         rather than the manifest shrinking"
+    );
+
+    let value = |key: &str| -> Option<String> {
+        let at = block.find(&format!("\"{key}\": "))? + key.len() + 4;
+        let rest = &block[at..];
+        Some(if let Some(r) = rest.strip_prefix('"') {
+            r[..r.find('"')?].to_owned()
+        } else {
+            rest[..rest.find([',', '\n']).unwrap_or(rest.len())]
+                .trim()
+                .to_owned()
+        })
+    };
+
+    // Arm 1: absent. Stated apart from arm 2 on purpose.
+    let status = value("status").expect(
+        "§6.8-0017: `sufficiency` carries no `status`. This is the ABSENT arm, and it is \
+         the one an enumeration of wrong tokens does not reach.",
+    );
+    // Arm 2: any other token.
+    assert!(
+        status == "demonstrated" || status == "unexercised",
+        "§6.8-0017: `status` is {status:?}; exactly `demonstrated` or `unexercised`"
+    );
+
+    // Arm 3: `demonstrated` without all five.
+    if status == "demonstrated" {
+        for k in [
+            "reproduced_by",
+            "artifact",
+            "vocabulary_version",
+            "guessed",
+            "derived",
+        ] {
+            assert!(
+                value(k).is_some() || block.contains(&format!("\"{k}\"")),
+                "§6.8-0017: `status` is `demonstrated` without `{k}`. All five are \
+                 required, and `guessed`/`derived` MAY be empty but MUST be present \
+                 — an empty array is the strong claim, and a reader is entitled to \
+                 see it made."
+            );
+        }
+    }
+}
