@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [kiss-vulkan-vocab 0.4.2] — 2026-09-06
+
+### Added — `vectors_digest`, so a demonstration can go stale (KISS-Classify §6.8-0017)
+
+The manifest now carries a top-level **`vectors_digest`** and pins its input
+construction in **`declarative.vectors_digest_input`**. The clause requires the
+namespace to pin the construction; carrying the digest is the `MAY` half, taken
+here because 24 bytes is the difference between a gate that compares a number
+this repository computed against a number this repository computed, and one a
+second party can check.
+
+⚠️ **The pin is the load-bearing half.** KISS pins the algorithm and constants
+and deliberately does *not* define this input: §6.8-0007's input is *"the
+canonical enumeration string it **replaces**"*, and the `vectors` array replaces
+nothing. An unpinned digest is a number every party computes differently while
+each compares only against itself — **vacuously green for its author and
+guaranteed red between two parties.**
+
+The construction is defined over **this manifest's own rendering**, not a
+re-serialization: a reader already holds the bytes, and asking them to
+re-serialize reintroduces every question canonical JSON leaves open — key order,
+whitespace, number formatting, `\u` escaping — none of which any clause settles.
+It excludes every `note` (required by the clause), states **UTF-8** explicitly,
+and is defined over **whatever members an element actually carries** rather than
+a fixed template, because a `digest_input` vector carries no `token` at all.
+
+Verified by rebuilding the digest **from the pinned sentence alone**, in another
+language, outside this repository — it reproduced the emitted value byte for
+byte. `vectors_digest_is_rebuildable_from_the_pinned_construction` does the same
+rebuild by hand in-tree and deliberately does not call the emitter's own
+helpers, which are in scope: calling them would compare the emitter against
+itself and pass for any construction whatsoever.
+
+⚠️ A version bump moves `generated_from` and **does not move `vectors_digest`** —
+checked, because a contract digest that drifts on a release number would fire on
+healthy input.
+
+### Fixed — the changelog gate could only see one of four published crates
+
+The gate added in #50 reads `vulkane`'s version and asserts a matching `## [...]`
+section. **This repository publishes four crates.** A `kiss-vulkan-vocab`-only
+release — like this one — shipped to crates.io with no changelog section and the
+gate stayed green, which is #41's defect exactly ("the repository denying the
+existence of a version that is on crates.io") reached through a different crate.
+
+It now checks **every publishable workspace member**. Co-release facts were taken
+from the registry rather than reconstructed: `vulkan_gen 0.5.0` and
+`kiss-vulkan-vocab 0.3.0` were published within twelve seconds of `vulkane
+0.13.0`; `vulkane_derive 0.1.1` within a minute of `vulkane 0.14.0`. Those two
+headings are annotated accordingly.
+
 ### Added — `kiss-vulkan-vocab` declares `sufficiency`, and closes all eight gaps a reproduction found
 
 **KISS-Classify §6.8-0017 requires a `sufficiency` object with a `status` of
@@ -250,7 +301,7 @@ alongside the let-chains and `libloading 0.9`. Anyone who concluded from the let
 1.88 could be lowered by rewriting them now has a wrong model. The floor is unchanged at 1.88 and
 the `msrv-minimality` job continues to require this crate to *fail* to compile on 1.87.
 
-## [0.14.0] — 2026-09-02
+## [0.14.0] — 2026-09-02  (kiss-vulkan-vocab 0.4.0, vulkane_derive 0.1.1)
 
 ### Fixed — the normative vectors pinned no set-valued field
 
@@ -457,7 +508,7 @@ requesting `kiss-vulkan-vocab = "0.3"` would have received version-5 tokens from
 patch upgrade. A breaking change wearing a compatible version number is exactly the silent kind:
 nothing fails, the tokens simply stop matching the ones already in a cache.
 
-## [0.13.0] — 2026-08-15
+## [0.13.0] — 2026-08-15  (kiss-vulkan-vocab 0.3.0, vulkan_gen 0.5.0)
 
 **First release since 0.10.1.** Versions 0.10.2, 0.11.0 and 0.12.0 were prepared and their entries
 are recorded below, but they were **never published to crates.io** — the `vulkan:` vocabulary work

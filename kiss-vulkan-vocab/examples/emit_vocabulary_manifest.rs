@@ -79,6 +79,24 @@ pub fn manifest() -> String {
     // An integer: no quotes, no decimal point. §6.8-0008 — "a gate that
     // truncates a fractional value is not a gate."
     writeln!(o, "  \"vocabulary_version\": {VOCABULARY_VERSION},").unwrap();
+    // ⚠️ The manifest's OWN vectors digest, the counterpart to
+    // `vocabulary_version` directly above it: §6.8-0017 has a reader compare a
+    // demonstration's `sufficiency.vectors_digest` against "the manifest's own",
+    // and `vocabulary_version` is the top-level field that phrase means for the
+    // other half of the pair.
+    //
+    // The clause requires only that a reader be able to REBUILD this from
+    // `vectors` by the pinned construction; carrying it is the MAY half. Carried
+    // anyway, and only because it costs 24 bytes: with no value in the artifact a
+    // local gate can only compare a number this file computed against a number
+    // this file computed. That is the vacuously-green shape -- green for its
+    // author, and silent about every other party.
+    writeln!(
+        o,
+        "  \"vectors_digest\": \"fnv1a64-{:016x}\",",
+        kiss_vulkan_vocab::fnv1a64(vectors_digest_input(&build_vectors()).as_bytes())
+    )
+    .unwrap();
     writeln!(
         o,
         "  \"generated_from\": \"{} {} (examples/emit_vocabulary_manifest.rs)\",",
@@ -235,6 +253,34 @@ fn emit_declarative(o: &mut String) {
         "    \"unnamed_component_escape_order\": \"numeric on <n>, not lexicographic\","
     )
     .unwrap();
+    // ⚠️ The construction of `vectors_digest`'s input, which §6.8-0017 requires
+    // the NAMESPACE to pin. KISS pins the algorithm and constants and explicitly
+    // does not define this input, because §6.8-0007's input is "the canonical
+    // enumeration string it REPLACES" and the vectors array replaces nothing.
+    //
+    // ⚠️ Defined over THIS MANIFEST'S OWN RENDERING rather than a re-serialization.
+    // A reader already holds the bytes; asking them to re-serialize reintroduces
+    // every question canonical JSON leaves open -- key order, whitespace, number
+    // formatting, unicode escaping -- none of which any clause settles. Taking the
+    // text as rendered has exactly one answer.
+    //
+    // ⚠️ Note-excluded, which the clause requires and which also happens to make
+    // the input pure ASCII here: 7 of 16 vectors carry non-ASCII in a note, 0 of 16
+    // without. That is luck rather than design, so the encoding is STATED.
+    writeln!(
+        o,
+        "    \"vectors_digest_input\": \"{}\",",
+        esc(
+            "Concatenate, in `vectors` array order, each element's JSON text exactly as \
+             this manifest renders it (surrounding whitespace and any trailing comma \
+             removed), with its `note` member and the `, ` separating it deleted, each \
+             followed by U+000A. Digest the UTF-8 bytes using the algorithm and \
+             constants above. Defined over whatever members an element actually \
+             carries, never a fixed template: a `digest_input` vector carries no \
+             `token` at all."
+        )
+    )
+    .unwrap();
     writeln!(o, "    \"digest_threshold_bytes\": {COOP_DIGEST_THRESHOLD}").unwrap();
     writeln!(o, "  }},").unwrap();
 }
@@ -316,6 +362,50 @@ fn emit_field_spec(o: &mut String) {
 // ---------------------------------------------------------------------------
 // Vectors — the normative contract (§6.8-0013).
 // ---------------------------------------------------------------------------
+
+/// One vector object with its `note` member removed.
+///
+/// ⚠️ Hand-written because this crate has no dependencies, dev-dependencies
+/// included (KISS-CLASSIFY-6.9-0003), so there is no JSON parser to reach for.
+///
+/// ⚠️ The escape awareness is not decoration. `esc` writes a quote as backslash-
+/// quote, and several notes contain quotes -- the `subgroup` note names the input
+/// spelling "dynamic" in them. A naive scan to the next quote stops INSIDE those
+/// notes and truncates the object mid-string, yielding a shorter digest input
+/// that is still a perfectly plausible string.
+fn without_note(json: &str) -> String {
+    const KEY: &str = "\"note\": \"";
+    let Some(at) = json.find(KEY) else {
+        return json.to_string();
+    };
+    let body = &json[at + KEY.len()..];
+    let mut end = None;
+    let mut escaped = false;
+    for (i, c) in body.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else if c == '\"' {
+            end = Some(i);
+            break;
+        }
+    }
+    let end = end.expect("a note string that never closes");
+    let rest = &body[end + 1..];
+    format!("{}{}", &json[..at], rest.strip_prefix(", ").unwrap_or(rest))
+}
+
+/// The bytes `vectors_digest` runs over, per the construction pinned in
+/// `declarative` (KISS-CLASSIFY-6.8-0017).
+fn vectors_digest_input(vectors: &[String]) -> String {
+    let mut s = String::new();
+    for v in vectors {
+        s.push_str(&without_note(v));
+        s.push('\n');
+    }
+    s
+}
 
 /// The `transpose` flag, which nothing pinned before.
 ///
