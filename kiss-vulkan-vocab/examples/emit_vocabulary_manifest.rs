@@ -190,6 +190,36 @@ pub fn manifest() -> String {
 
 fn emit_declarative(o: &mut String) {
     writeln!(o, "  \"declarative\": {{").unwrap();
+    // ⚠️ The angle-bracket convention, stated because NOTHING said it.
+    //
+    // Five values in this manifest carry `<...>` placeholders -- four here
+    // (`unnamed_component_escape`, `empty_set_spelling`, `digest_marker`,
+    // `unnamed_component_escape_order`) and the top-level `grammar`. A reader
+    // had to infer that the brackets were not literal text.
+    //
+    // ⚠️ Found by baracuda rebuilding the digest from this manifest alone.
+    // They read `digest_marker` as a PREFIX and emitted
+    // `fnv1a64-<hex16>-5fb4518c42b73202`. That was the only error in an
+    // otherwise byte-exact reproduction, and the field name argues for their
+    // reading: a thing called a MARKER sounds like literal text, while its
+    // value is a format string. The `<hex16>` inside the value is the only
+    // thing that says otherwise.
+    //
+    // Renaming `digest_marker` would fix the instance. Stating the notation
+    // fixes the class -- which is the lesson `sgdyn` taught by sitting beside
+    // `transpose` unnoticed while `transpose` was being closed.
+    writeln!(
+        o,
+        "    \"notation\": \"{}\",",
+        esc(
+            "An angle-bracketed name is a PLACEHOLDER for a value, never literal \
+             text: `fnv1a64-<hex16>` means the marker `fnv1a64-` followed by \
+             sixteen hex digits, not a string containing `<hex16>`. This applies \
+             to every value in this manifest, including `grammar`. Text outside \
+             the brackets is literal."
+        )
+    )
+    .unwrap();
     writeln!(o, "    \"field_count\": 5,").unwrap();
     writeln!(o, "    \"field_separator\": \".\",").unwrap();
     writeln!(o, "    \"tuple_separator\": \"-\",").unwrap();
@@ -271,13 +301,17 @@ fn emit_declarative(o: &mut String) {
         o,
         "    \"vectors_digest_input\": \"{}\",",
         esc(
-            "Concatenate, in `vectors` array order, each element's JSON text exactly as \
-             this manifest renders it (surrounding whitespace and any trailing comma \
-             removed), with its `note` member and the `, ` separating it deleted, each \
-             followed by U+000A. Digest the UTF-8 bytes using the algorithm and \
-             constants above. Defined over whatever members an element actually \
-             carries, never a fixed template: a `digest_input` vector carries no \
-             `token` at all."
+            "Take each element of `vectors` AS RAW TEXT, exactly as this manifest \
+             renders it -- do NOT parse and re-serialize it, because a producer that \
+             re-serializes emits its own key order and whitespace and gets different \
+             bytes. Trim surrounding whitespace and any trailing comma. Delete the \
+             element's `note` member and the `, ` separating it, locating the member's \
+             end by JSON string-scanning rather than by searching for `, `, since a \
+             note's own prose contains that sequence. Concatenate the results in array \
+             order, each followed by U+000A, and digest the UTF-8 bytes using the \
+             algorithm and constants above. Defined over whatever members an element \
+             actually carries, never a fixed template: a `digest_input` vector carries \
+             no `token` at all."
         )
     )
     .unwrap();
