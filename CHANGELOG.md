@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `kiss-vulkan-vocab` declares `sufficiency`, and closes all eight gaps a reproduction found
+
+**KISS-Classify §6.8-0017 requires a `sufficiency` object with a `status` of
+exactly `demonstrated` or `unexercised`.** This manifest ships **`unexercised`
+despite a real demonstration having happened** — baracuda reproduced the
+twelve-vector 0.4.1 manifest byte-identically from the manifest alone, archive
+deleted, no source and no docs.rs. §6.8-0013 makes the vectors array the
+normative contract, and it has moved since; **the artifact being shipped is not
+the artifact that was reproduced**, and carrying the result forward would credit
+a run nobody performed.
+
+**The reproduction's value was never the pass.** It was the list of things they
+had to supply from outside. All eight are now closed — seven below, and the eighth (`saturating`) under its own heading, because it turned out to be a defect rather than a gap:
+
+| Gap | Closed by |
+|---|---|
+| FNV-1a-64 offset basis and prime | `declarative`, **emitted from the crate constants** so the manifest cannot drift from the digest it describes |
+| hex padding and `x<n>` ordering | `declarative` — every pinned digest happens to have no leading-zero nibble and every sampled run is equal-width, so no vector could ever discriminate |
+| the digest's input **encoding** | `declarative` `digest_encoding` — every spelling this vocabulary can produce is ASCII, so the question is outside what a vector can ask |
+| `transpose` | a vector carrying `transpose: true` beside a non-transposing combination |
+| `sgdyn` | a vector whose **input** is the string `"dynamic"` — the gap was in the input half, which no vector passing an integer width could reach |
+| the `<coop>` tie-break | two distinct shapes agreeing on m, n and k, **swapping `a` and `b`** — the only input shape that can separate `(a, b, c, result)` from any other permutation |
+
+⚠️ **A vector pins the OUTPUT, not the algorithm** (baracuda). That sorts a gap
+list into vector-closable and prose-only, and the two halves need different
+fixes — which is why the digest facts are stated rather than sampled.
+
+### Fixed — the `-sat` suffix was in NEITHER half of the manifest
+
+**`<coop>` tuples take a trailing `-sat` when the shape saturates, and nothing
+said so.** `field_spec` read "M-N-K plus four component types" and stopped, and
+all fifty-six shapes across the vectors carried `saturating: false` — so the
+suffix appeared in **no vector and no description**. A reader building a producer
+from this manifest could not have emitted it by any route, and under §6.8-0002's
+byte-exact matching that is a different cell, not a near miss.
+
+⚠️ **Reported as "`saturating` is not spelled into the coop tuple", which is
+wrong about the code — but the reasoning was sound and called for the right
+fix.** The observation was that every vector carries `saturating: false`, so a
+producer that appended the field would still match all twelve. That holds whether
+the suffix exists or not, which is exactly why the vectors could not answer it.
+
+### Fixed — the `sufficiency` note went stale about which artifact it describes
+
+**It said "This manifest has thirteen" and was wrong one commit later**, when
+three vectors landed and `vocabulary_version` did not move. **The field whose
+entire purpose is to say "what ships here is not what was reproduced" had itself
+gone stale about what ships here** — the same currency gap reported upstream
+against §6.8-0017, arriving from inside the field meant to prevent it. The count
+is now derived from the vector list, so there is nothing to update.
+
+### Added — gates, because §6.8-0017 is the only §6.8 row in KISS's `UNBACKED.tsv`
+
+Nothing in the conformance suite catches a malformed `sufficiency` block, so
+these are local:
+
+- `flag_vectors_pin_the_spellings_their_notes_describe` — a vector is
+  self-consistent **by construction** here (the emitter derives the token from
+  the same code that spells it), which is deliberate and is also why a vector
+  cannot catch a wrong **note**. Born-red on all three arms: collapsing the
+  saturating tuples, swapping the tie-break order, and spelling the subgroup
+  input as a number.
+- `sufficiency_is_declared_per_6_8_0017` gained a fourth arm requiring the note
+  to **name** the manifest's own vector count. ⚠️ Its first draft asserted
+  `n <= vectors` over each digit run, which a stale `13` satisfies as
+  comfortably as a correct `16` — a gate that cannot fail the defect it is named
+  after. Born-red on a stale count and on an absent one.
+
 ## [0.16.0] — 2026-09-06  (kiss-vulkan-vocab 0.4.1)
 
 ### Fixed — `kiss-vulkan-vocab`'s published grammar described a FOUR-field token

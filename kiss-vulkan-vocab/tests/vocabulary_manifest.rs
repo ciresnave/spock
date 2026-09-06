@@ -499,4 +499,152 @@ fn sufficiency_is_declared_per_6_8_0017() {
             );
         }
     }
+
+    // Arm 4: the note must NAME the vector count this manifest actually carries.
+    //
+    // ⚠️ Not hypothetical. The first `sufficiency` note said "This manifest
+    // has thirteen" and was wrong one commit later, when three vectors landed
+    // and `vocabulary_version` did not move. The block whose entire purpose is
+    // to say "what ships here is not what was reproduced" had gone stale about
+    // what ships here.
+    //
+    // Stated as a POSITIVE requirement rather than a bound. The first draft of
+    // this arm asserted `n <= vectors` over every digit run in the note, which
+    // a stale `13` satisfies as comfortably as a correct `16` — a gate that
+    // cannot fail the defect it is named after. Requiring the true count to
+    // APPEAR has no such hole: there is exactly one number that satisfies it.
+    let vectors = text.matches("\"pins\": ").count();
+    assert!(
+        vectors > 0,
+        "positive control: the vector extractor found none, so the check below \
+         would be comparing against zero and any note at all would pass it"
+    );
+    let named: Vec<usize> = block
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|w| !w.is_empty())
+        .filter_map(|w| w.parse().ok())
+        .collect();
+    assert!(
+        named.contains(&vectors),
+        "the sufficiency note names {named:?} but this manifest carries \
+         {vectors} vectors, and the note must say so. A number here is a claim \
+         about WHICH ARTIFACT is shipping; a stale one asserts a reproduction \
+         of something that is not being shipped — the exact failure §6.8-0017 \
+         exists to prevent, arriving from inside the field meant to prevent it."
+    );
+}
+
+/// The three vectors closing baracuda's residue pin SPELLINGS, and a note that
+/// describes a spelling is prose until something compares it to the token.
+///
+/// ⚠️ Written because the first draft of the `saturating` note asserted the
+/// OPPOSITE of what this vocabulary does. It claimed `saturating` was not
+/// spelled into the tuple and that two shapes differing only in that field
+/// would collapse into one; the emitted token spells a trailing `-sat` and
+/// keeps both. The note was wrong for the same reason the gap existed — no
+/// vector had ever produced the token, so nothing could contradict a
+/// plausible sentence about it.
+///
+/// A vector is self-consistent BY CONSTRUCTION here: the emitter derives the
+/// token from the same code that spells it, so input and token can never
+/// disagree. That is deliberate, and it is also why a vector cannot catch a
+/// wrong NOTE. This test is the only thing standing between the two halves.
+#[test]
+fn flag_vectors_pin_the_spellings_their_notes_describe() {
+    let m = committed();
+
+    let line_for = |pins: &str| -> String {
+        m.lines()
+            .find(|l| l.contains(&format!("\"pins\": \"{pins}\"")))
+            .unwrap_or_else(|| {
+                panic!(
+                    "no vector pins {pins:?}. This is the ABSENT arm: the test \
+                     cannot check a spelling that no vector produces, and a \
+                     silently-skipped check is what let the wrong note ship."
+                )
+            })
+            .to_string()
+    };
+    let token_for = |pins: &str| -> String {
+        let line = line_for(pins);
+        between(&line, "\"token\": \"", "\"")
+            .unwrap_or_else(|| panic!("vector {pins:?} carries no token"))
+            .to_string()
+    };
+    let coop_tuples = |token: &str| -> Vec<String> {
+        token
+            .split('.')
+            .find(|p| p.starts_with("cm-"))
+            .unwrap_or_else(|| panic!("token {token:?} has no <coop> field"))
+            .trim_start_matches("cm-")
+            .split(',')
+            .map(str::to_string)
+            .collect()
+    };
+
+    // -- subgroup: the dynamic width, in the TOKEN and in the INPUT.
+    let sg = token_for("subgroup");
+    assert!(
+        sg.starts_with("vulkan:sgdyn."),
+        "the subgroup vector's token is {sg:?}, which does not spell `sgdyn`. \
+         The width-agnostic case is the one spelling `<subgroup>` has that is \
+         not a number, so a token carrying a width here pins nothing new."
+    );
+    assert!(
+        line_for("subgroup").contains("\"subgroup\": \"dynamic\""),
+        "the subgroup vector's INPUT does not spell the dynamic case as the \
+         string \"dynamic\". The gap this vector closes is in the input half — \
+         a reader who has only seen `\"subgroup\": 32` cannot know what to pass \
+         — so an input spelled any other way leaves the gap open."
+    );
+
+    // -- saturating: spelled as a trailing `-sat`, and NOT collapsed.
+    let tuples = coop_tuples(&token_for("saturating"));
+    assert_eq!(
+        tuples.len(),
+        2,
+        "the saturating vector spells {} <coop> tuple(s), expected 2. Two \
+         shapes differing only in `saturating` are DISTINCT, and a producer \
+         that dropped the field would emit one tuple where this emits two — \
+         under byte-exact matching, a different cell rather than a near miss.",
+        tuples.len()
+    );
+    assert_eq!(
+        tuples.iter().filter(|t| t.ends_with("-sat")).count(),
+        1,
+        "expected exactly one of {tuples:?} to end in `-sat`. The suffix marks \
+         the saturating form and the non-saturating form carries no marker at \
+         all; two markers or none would both mean the flag is not what \
+         distinguishes them."
+    );
+
+    // -- tiebreak: shapes agreeing on m,n,k order on (a, b, c, result).
+    let tuples = coop_tuples(&token_for("tiebreak"));
+    assert_eq!(
+        tuples.len(),
+        2,
+        "the tiebreak vector spells {} <coop> tuple(s), expected 2 — two \
+         DISTINCT shapes agreeing on m, n and k. If they collapsed, they were \
+         not distinct and the vector pins nothing about ordering.",
+        tuples.len()
+    );
+    let field = |t: &str, i: usize| t.split('-').nth(i).unwrap_or_default().to_string();
+    // m-n-k-a-b-c-result: `a` is index 3, `b` is index 4.
+    assert_eq!(
+        (field(&tuples[0], 3), field(&tuples[0], 4)),
+        ("f16".to_string(), "f32".to_string()),
+        "the first tiebreak tuple is {:?}; expected `a`=f16 and `b`=f32. The \
+         two shapes SWAP `a` and `b`, so this ordering is what proves the \
+         tie-break descends (a, b, c, result) rather than some other \
+         permutation — under (b, a, ...) the other shape would sort first.",
+        tuples[0]
+    );
+    assert_eq!(
+        (field(&tuples[1], 3), field(&tuples[1], 4)),
+        ("f32".to_string(), "f16".to_string()),
+        "the second tiebreak tuple is {:?}; expected the swapped pair. Both \
+         tuples must be present and in this order — checking only the first \
+         would pass on a vector that dropped the second entirely.",
+        tuples[1]
+    );
 }

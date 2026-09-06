@@ -128,18 +128,30 @@ pub fn manifest() -> String {
     // cannot.
     writeln!(o, "  \"sufficiency\": {{").unwrap();
     writeln!(o, "    \"status\": \"unexercised\",").unwrap();
+    // ⚠️ The count is DERIVED from the vector list, not spelled out.
+    //
+    // The first version of this note said "thirteen" and was stale one commit
+    // later, when three vectors closing baracuda's residue landed and
+    // `vocabulary_version` did not move. The field whose whole purpose is to
+    // say "this artifact is not the one that was reproduced" had itself gone
+    // stale about which artifact this is.
+    //
+    // That is the same currency gap reported against §6.8-0017 upstream: a
+    // reproduction record keyed on `vocabulary_version` is blind to the vector
+    // set moving underneath it. Deriving the number is the one fix available
+    // inside this file — it cannot drift, because there is nothing to update.
     writeln!(
         o,
         "    \"note\": \"{}\"",
-        esc(
-            "A byte-identical reproduction of the TWELVE-vector 0.4.1 manifest was performed by \
-             baracuda from the manifest alone. This manifest has thirteen; the additional vector \
-             pins `transpose` and was added because of that reproduction, so what ships here is \
-             not what was reproduced. Recorded as unexercised rather than carried forward: \
-             §6.8-0013 makes the vectors array the normative contract, and it moved. A re-run \
-             against this artifact is the remedy, and its value is the `guessed` list, not the \
-             pass."
-        )
+        esc(&format!(
+            "A byte-identical reproduction of the TWELVE-vector 0.4.1 manifest was performed \
+             by baracuda from the manifest alone. This manifest has {n_vectors}, the extra \
+             ones added because of that reproduction, so what ships here is not what was \
+             reproduced. Recorded as unexercised rather than carried forward: §6.8-0013 makes \
+             the vectors array the normative contract, and it moved. A re-run against this \
+             artifact is the remedy, and its value is the `guessed` list, not the pass.",
+            n_vectors = build_vectors().len()
+        ))
     )
     .unwrap();
     writeln!(o, "  }},").unwrap();
@@ -196,6 +208,17 @@ fn emit_declarative(o: &mut String) {
         o,
         "    \"digest_prime\": \"{:#x}\",",
         kiss_vulkan_vocab::FNV_PRIME
+    )
+    .unwrap();
+    // ⚠️ The BYTES the digest runs over, which is not the same fact as the
+    // algorithm above. FNV-1a is defined on a byte sequence, and every spelling
+    // this vocabulary can produce is ASCII, so no digest_input vector can ever
+    // discriminate UTF-8 from Latin-1 from UTF-16 — they agree on the whole
+    // corpus. The vectors are not weak here; the question is OUTSIDE what a
+    // vector can ask. Stated because a manifest-only reader must otherwise guess.
+    writeln!(
+        o,
+        "    \"digest_encoding\": \"UTF-8 bytes of the enumeration string\","
     )
     .unwrap();
     // Both pinned digests happen to have no leading zero nibble, so the vectors
@@ -255,7 +278,8 @@ fn emit_field_spec(o: &mut String) {
             "coop",
             "cm-",
             "Cooperative-MATRIX shapes. Each tuple is M-N-K plus four component \
-             types, joined by `-`; tuples are joined by `,`. Sorted and \
+             types, joined by `-`, followed by a literal `-sat` when and only \
+             when the shape saturates; tuples are joined by `,`. Sorted and \
              deduplicated canonically, because driver report order is not \
              guaranteed stable and the token must be byte-identical either way. \
              LENGTH-CONDITIONAL — see the `threshold` and `digest_input` \
@@ -293,7 +317,12 @@ fn emit_field_spec(o: &mut String) {
 // Vectors — the normative contract (§6.8-0013).
 // ---------------------------------------------------------------------------
 
-fn emit_vectors(o: &mut String) {
+/// Build the vector list.
+///
+/// Split from the printing so the COUNT is available to `sufficiency`,
+/// which is emitted earlier in the file and previously spelled the number
+/// out by hand.
+fn build_vectors() -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
 
     // -- order: a non-canonically-ordered input and its canonical output.
@@ -359,6 +388,91 @@ fn emit_vectors(o: &mut String) {
         ],
     ));
 
+    // ⚠️ SUBGROUP, whose DYNAMIC spelling no vector reached.
+    //
+    // Same shape as `transpose` immediately above, and sitting right beside
+    // it: `field_spec` describes width-agnostic compilation, and all twelve
+    // original vectors passed an INTEGER width, so `sgdyn` existed only in the
+    // half §6.8-0013 calls documentation. Closing `transpose` without sweeping
+    // for its shape left the sibling in place — the fix was per-instance and
+    // the defect was per-class.
+    //
+    // The gap is specifically the INPUT representation: a reader who has only
+    // ever seen `"subgroup": 32` cannot know what a producer passes to ask for
+    // the dynamic case, so this vector pins the input spelling and the token
+    // together.
+    v.push(subgroup_vector(
+        "subgroup",
+        "Width-agnostic compilation. Pins BOTH that the dynamic case spells \
+        `sgdyn` rather than a width, AND that its input is the string `dynamic` \
+        rather than a number, a null, or an absent field — which no vector \
+        passing an integer width could ever show.",
+    ));
+
+    // ⚠️ SATURATING, absent from BOTH halves of the manifest — worse than
+    // `transpose`, which at least `field_spec` described.
+    //
+    // Reported by baracuda as "`saturating` is not spelled into the coop
+    // tuple". That conclusion is wrong — it spells a trailing `-sat`,
+    // measured — but the REASONING was sound and the action it called for was
+    // right: they observed that all twelve vectors carry `saturating: false`,
+    // so a producer that appended the field would still match every one. That
+    // holds whether the suffix exists or not, which is exactly why the vectors
+    // could not answer it.
+    //
+    // ⚠️ And nothing in the prose could have corrected them: `field_spec`
+    // said "M-N-K plus four component types" and stopped, so the suffix
+    // appeared in NO vector and NO description. A reader building a producer
+    // from this manifest could not have emitted `-sat` by any route. The prose
+    // is fixed above; this vector fixes the normative half.
+    v.push(coop_vector(
+        "saturating",
+        "Two shapes differing ONLY in `saturating`, one true and one false. The \
+         saturating one takes a trailing `-sat` and the two remain SEPARATE \
+         tuples, so a producer that ignored the field would emit one tuple where \
+         the vocabulary emits two. Pins the suffix, its position after the \
+         component types, and that the non-saturating form carries no marker at \
+         all.",
+        &[
+            CoopShape {
+                saturating: true,
+                ..big_shape(1)
+            },
+            big_shape(1),
+        ],
+    ));
+
+    // ⚠️ The TIE-BREAK FIELD ORDER, for shapes agreeing on m, n and k.
+    //
+    // The only duplicate-bearing vector is `dedup`, whose repeated shapes are
+    // IDENTICAL — they exercise deduplication and say nothing about ordering,
+    // because collapsing them needs no comparison beyond equality. Nothing
+    // pinned what happens when two DISTINCT shapes tie on the dimensions.
+    //
+    // These two swap `a` and `b`, so the field order is what decides: under
+    // (a, b, c, result) the f16-first shape sorts first; under (b, a, ...) the
+    // other does. A vector where only one field varies cannot separate the two.
+    v.push(coop_vector(
+        "tiebreak",
+        "Two distinct shapes agreeing on m, n and k, given in non-canonical \
+         order, differing by a SWAP of `a` and `b`. Pins that the tie-break \
+         descends (a, b, c, result) in that order rather than any other \
+         permutation — a swap is the only input shape that can, since every field \
+         order agrees when just one field differs.",
+        &[
+            CoopShape {
+                a: ComponentType::F32,
+                b: ComponentType::F16,
+                ..big_shape(1)
+            },
+            CoopShape {
+                a: ComponentType::F16,
+                b: ComponentType::F32,
+                ..big_shape(1)
+            },
+        ],
+    ));
+
     // -- the two SET-VALUED scalar fields. Nothing pinned these before: every
     //    vector above carries `ops-none` and `arith-none`, so a consumer could
     //    read the alphabet and still not know how two members are joined.
@@ -414,6 +528,11 @@ fn emit_vectors(o: &mut String) {
         ),
     }
 
+    v
+}
+
+fn emit_vectors(o: &mut String) {
+    let v = build_vectors();
     writeln!(o, "  \"vectors\": [").unwrap();
     for (i, entry) in v.iter().enumerate() {
         let comma = if i + 1 == v.len() { "" } else { "," };
@@ -615,6 +734,29 @@ fn combo_json(c: &CoopVecCombo) -> String {
         c.bias_interpretation.spelling(),
         c.result.spelling(),
         c.transpose
+    )
+}
+
+/// A vector for `<subgroup>` when the width is not a number.
+///
+/// Every other vector in this file hardcodes `"subgroup": 32`, which is why
+/// the dynamic case needs its own constructor rather than another
+/// `coop_vector` call: the gap being closed is in the INPUT half, and a helper
+/// that cannot vary the input cannot express it.
+fn subgroup_vector(pins: &str, note: &str) -> String {
+    let token = VulkanTarget {
+        subgroup: Subgroup::Dynamic,
+        ops: OpClasses::NONE,
+        arith: Arith::NONE,
+        coop: CoopMatrix::None,
+        coopvec: CoopVector::None,
+    }
+    .to_token();
+    format!(
+        "{{ \"pins\": \"{}\", \"field\": \"subgroup\", \"note\": \"{}\", \"input\": {{ \"subgroup\": \"dynamic\", \"ops\": [], \"arith\": [], \"coop\": [], \"coopvec\": [] }}, \"token\": \"{}\" }}",
+        pins,
+        esc(note),
+        token
     )
 }
 
