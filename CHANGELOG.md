@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `kiss-vulkan-vocab`'s published grammar described a FOUR-field token
+
+⚠️ **The module doc is the only artifact describing the `vulkan:` token grammar
+to anyone outside this repository, and it was wrong.** `to_token` has emitted
+**five** fields since the v4 bump —
+`subgroup.ops.arith.coop.coopvec` — while the doc's grammar line, its "Four
+fields in fixed positions" sentence and its field table all described four,
+omitting `coopvec` entirely. Live on docs.rs for **0.4.0**.
+
+**Not cosmetic, because KISS-Classify §6.8-0002 matches byte-exact with no
+tolerance.** A second implementer reading the published doc emits a four-field
+token that can never match anything this crate produces — and `parse` rejects
+it outright, since `parse` requires exactly five. The code was right, the
+contract description was wrong, and the description is what an outside
+implementer has.
+
+Found while gathering citations to file this crate's pinned decisions as KISS
+issues: the summary said "five-field token", the module doc said four, and the
+disagreement was the finding.
+
+`the_grammar_doc_matches_what_to_token_emits` now pins it, checking three
+artifacts against one source of truth because the failure was that two of them
+disagreed silently: the `format!` in `to_token`, the `//!` grammar line, and the
+field table's data rows. Born red against the real historical wording —
+*"`to_token` emits 5 fields but the grammar line declares 4"*.
 ### Removed — the `slang` feature, and runtime Slang compilation with it
 
 ⚠️ **Breaking for anyone enabling `features = ["slang"]`.** The feature, the
