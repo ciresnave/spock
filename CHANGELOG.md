@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [kiss-vulkan-vocab 0.4.4] — 2026-09-06
+
+### Fixed — `tuple_sort_key` said LEXICOGRAPHIC and the vocabulary sorts by ORDINAL
+
+The field added in 0.4.3 read *"Tuples sort **lexicographically by their spelled
+components**…"*. The code sorts by each component's position in
+`component_types`, and the two disagree:
+
+    lexicographic   'u32…' < 'u8…'        would put u32 FIRST
+    array index     u8 = 8  <  u32 = 10   puts u8 FIRST
+    vectors[13]     spells u8 FIRST       -> ordinal, not lexicographic
+
+**A producer following the stated rule emits a different enumeration and —
+above the 512-byte threshold — a different digest.**
+
+⚠️ **The field has two clauses and only one was wrong.** The *flag-as-last-key*
+half is correct and is what closed the previous gap; **the justification
+attached to it was not**. A correct action carrying a wrong reason survives
+because the action is right, so nobody reads the reason adversarially.
+
+Measured by baracuda against published 0.4.3, from the manifest alone.
+
+### Added — a vector for where an unnamed escape sorts against a named type
+
+`tuple_sort_key` claims `x<n>` escapes sort after every named type. That is true
+in the code — `Other(u32)` is the last variant — but ⚠️ **zero vectors put a
+named type and an escape at the same tuple position**, so no reader could check
+the claim and no producer could be caught getting it wrong.
+
+**Stating an unexercised rule is exactly how the lexicographic defect shipped.**
+`vectors[4]` now carries `…-f16` beside `…-x5`, escape-first in the input.
+
+`vectors_digest` moves to `fnv1a64-8263e55f94b959e1` — correctly, the vectors
+array gained a member.
+
+### Added — a gate that EXECUTES the stated rule
+
+⚠️ **The composition gate cannot reach this class.** It substitutes into
+**templates**; `tuple_sort_key` is prose describing an **algorithm**, and the
+only instrument that finds a wrong algorithm is running it and comparing.
+
+`executing_the_stated_sort_rule_reproduces_the_token_order` ranks every
+`<coopvec>` component by its `component_types` index, re-sorts each multi-tuple
+field, and asserts the result is what the token already spells. Its control is
+the part that matters: **at least one vector must actually separate ordinal from
+lexicographic order**, or the test passes under either rule and says nothing
+about which is stated.
+
+⚠️ **And it asserts against the prose as well as the corpus.** Executing a
+hardcoded ordinal rule proves what the vocabulary does and nothing about what
+the manifest claims — the same blindness that let `empty_set_spelling` ship
+wrong one release earlier. Restoring either the lexicographic wording or a
+swapped tuple now reds.
+
 ## [kiss-vulkan-vocab 0.4.3] — 2026-09-06
 
 ### Fixed — nothing said the angle brackets were placeholders

@@ -350,10 +350,14 @@ fn emit_declarative(o: &mut String) {
         o,
         "    \"tuple_sort_key\": \"{}\",",
         esc(
-            "Tuples sort lexicographically by their spelled components in order, with \
-             any trailing flag (`-sat`, `-t`) as the LAST key rather than outside the \
-             comparison; the unflagged form orders before the flagged one. \
-             Deduplication happens after sorting and before the length is measured."
+            "Tuples sort by each component's INDEX IN `component_types`, field by \
+             field in the order they are spelled -- NOT by comparing the spelled \
+             strings, which disagrees: `u32` precedes `u8` as text and follows it \
+             in the array. Unnamed `x<n>` escapes sort after every named type, \
+             numerically on n. Any trailing flag (`-sat`, `-t`) is the LAST key \
+             rather than outside the comparison, so the unflagged form orders \
+             before the flagged one. Deduplication happens after sorting and \
+             before the length is measured."
         )
     )
     .unwrap();
@@ -499,6 +503,39 @@ fn vectors_digest_input(vectors: &[String]) -> String {
     s
 }
 
+/// Where an unnamed `x<n>` escape sorts against a NAMED type.
+///
+/// ⚠️ Added because nothing exercised it. `tuple_sort_key` claims escapes
+/// sort after every named type, and that is true in the code -- `Other(u32)` is
+/// the last variant, so the derived ordering puts it last -- but ZERO vectors
+/// put a named type and an escape at the SAME position, so no reader could
+/// check the claim and no producer could be caught getting it wrong.
+///
+/// ⚠️ Stating an unexercised rule is how the previous sort-key defect shipped:
+/// the prose said `lexicographically` and the corpus sorted by ordinal, and
+/// every vector was correct so nothing could disagree with the sentence.
+fn escape_order_vector() -> String {
+    coopvec_vector(
+        "escape_order",
+        "A named component and an unnamed `x<n>` escape at the SAME tuple \
+         position, given escape-first. Pins that escapes sort AFTER every named \
+         type rather than by their spelling -- `f16` and `x5` compare as `f` \
+         before `x` by accident here, so a producer sorting spellings passes \
+         this vector; what it cannot pass is the `u8`/`u32` pair in the \
+         threshold vectors, and the two together pin ordinal order.",
+        &[
+            CoopVecCombo {
+                result: ComponentType::Other(5),
+                ..combo(1)
+            },
+            CoopVecCombo {
+                result: ComponentType::F16,
+                ..combo(1)
+            },
+        ],
+    )
+}
+
 /// The `transpose` flag, which nothing pinned before.
 ///
 // ⚠️ The TRANSPOSE flag, which nothing pinned before.
@@ -641,6 +678,7 @@ fn flag_vectors() -> Vec<String> {
         dynamic_subgroup_vector(),
         saturating_vector(),
         tiebreak_vector(),
+        escape_order_vector(),
     ]
 }
 
