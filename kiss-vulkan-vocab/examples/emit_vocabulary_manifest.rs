@@ -317,52 +317,17 @@ fn emit_field_spec(o: &mut String) {
 // Vectors — the normative contract (§6.8-0013).
 // ---------------------------------------------------------------------------
 
-/// Build the vector list.
+/// The vectors that pin a FLAG or a NON-NUMERIC spelling.
 ///
-/// Split from the printing so the COUNT is available to `sufficiency`,
-/// which is emitted earlier in the file and previously spelled the number
-/// out by hand.
-fn build_vectors() -> Vec<String> {
-    let mut v: Vec<String> = Vec::new();
-
-    // -- order: a non-canonically-ordered input and its canonical output.
-    let unsorted = vec![big_shape(3), big_shape(1), big_shape(2)];
-    v.push(coop_vector(
-        "order",
-        "Shapes presented in non-canonical order. A producer that emitted \
-         driver order would differ from an honest peer on the same device, and \
-         under byte-exact matching that is a different cell rather than a \
-         degraded answer.",
-        &unsorted,
-    ));
-
-    // -- dedup: a duplicate-bearing input and its deduped output.
-    let dupes = vec![big_shape(1), big_shape(2), big_shape(1), big_shape(2)];
-    v.push(coop_vector(
-        "dedup",
-        "A duplicate-bearing input. Deduplication happens before spelling, so \
-         a device reporting the same shape twice yields the same token as one \
-         reporting it once.",
-        &dupes,
-    ));
-
-    // -- the same two for <coopvec>, because the fields are independent.
-    let cv_unsorted = vec![combo(3), combo(1), combo(2)];
-    v.push(coopvec_vector(
-        "order",
-        "Cooperative-VECTOR combinations in non-canonical order. Pinned \
-         separately from <coop> because the two fields canonicalize \
-         independently — an implementation that sorted one and not the other \
-         would pass a <coop>-only vector set.",
-        &cv_unsorted,
-    ));
-    let cv_dupes = vec![combo(1), combo(2), combo(1)];
-    v.push(coopvec_vector(
-        "dedup",
-        "Duplicate cooperative-vector combinations.",
-        &cv_dupes,
-    ));
-
+/// ⚠️ Grouped because they share a failure mode, not because they share a
+/// field. Each one pins something that is USUALLY ABSENT from a sample:
+/// `transpose` and `saturating` were false in every shape the vocabulary had
+/// ever enumerated, `sgdyn` is the one `<subgroup>` spelling that is not a
+/// number, and the tie-break only exists when two shapes collide on m, n, k.
+///
+/// A flag that is usually absent is exactly what a sample omits, and all four
+/// were found by a foreign party reproducing this manifest — not here.
+fn flag_vectors() -> Vec<String> {
     // ⚠️ The TRANSPOSE flag, which nothing pinned before.
     //
     // `field_spec` describes it -- "five component types plus a transpose flag"
@@ -376,7 +341,7 @@ fn build_vectors() -> Vec<String> {
     // same cause, and neither was visible from the score.
     //
     // A flag that is usually absent is exactly what a sample omits.
-    v.push(coopvec_vector(
+    let mut v = vec![coopvec_vector(
         "transpose",
         "A transposing cooperative-vector combination beside a non-transposing one. Pins that `transpose` is spelled as a trailing `-t` rather than as a sixth component type, and that a clear flag costs nothing: the two combos differ ONLY in the flag, so the suffix is the only difference between their spellings.",
         &[
@@ -386,7 +351,7 @@ fn build_vectors() -> Vec<String> {
             },
             combo(1),
         ],
-    ));
+    )];
 
     // ⚠️ SUBGROUP, whose DYNAMIC spelling no vector reached.
     //
@@ -472,6 +437,57 @@ fn build_vectors() -> Vec<String> {
             },
         ],
     ));
+
+    v
+}
+
+/// Build the vector list.
+///
+/// Split from the printing so the COUNT is available to `sufficiency`,
+/// which is emitted earlier in the file and previously spelled the number
+/// out by hand.
+fn build_vectors() -> Vec<String> {
+    let mut v: Vec<String> = Vec::new();
+
+    // -- order: a non-canonically-ordered input and its canonical output.
+    let unsorted = vec![big_shape(3), big_shape(1), big_shape(2)];
+    v.push(coop_vector(
+        "order",
+        "Shapes presented in non-canonical order. A producer that emitted \
+         driver order would differ from an honest peer on the same device, and \
+         under byte-exact matching that is a different cell rather than a \
+         degraded answer.",
+        &unsorted,
+    ));
+
+    // -- dedup: a duplicate-bearing input and its deduped output.
+    let dupes = vec![big_shape(1), big_shape(2), big_shape(1), big_shape(2)];
+    v.push(coop_vector(
+        "dedup",
+        "A duplicate-bearing input. Deduplication happens before spelling, so \
+         a device reporting the same shape twice yields the same token as one \
+         reporting it once.",
+        &dupes,
+    ));
+
+    // -- the same two for <coopvec>, because the fields are independent.
+    let cv_unsorted = vec![combo(3), combo(1), combo(2)];
+    v.push(coopvec_vector(
+        "order",
+        "Cooperative-VECTOR combinations in non-canonical order. Pinned \
+         separately from <coop> because the two fields canonicalize \
+         independently — an implementation that sorted one and not the other \
+         would pass a <coop>-only vector set.",
+        &cv_unsorted,
+    ));
+    let cv_dupes = vec![combo(1), combo(2), combo(1)];
+    v.push(coopvec_vector(
+        "dedup",
+        "Duplicate cooperative-vector combinations.",
+        &cv_dupes,
+    ));
+
+    v.extend(flag_vectors());
 
     // -- the two SET-VALUED scalar fields. Nothing pinned these before: every
     //    vector above carries `ops-none` and `arith-none`, so a consumer could
