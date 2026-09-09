@@ -874,12 +874,37 @@ fn set_field_vectors() -> Vec<String> {
         "An input REPEATING a member. `<ops>` is a SET, so `b` twice is \
          absorbed and the token spells it once -- a producer that concatenated \
          its input would emit `ops-bbw`, which under §6.8-0002 is a different \
-         cell rather than a differently-written same one. This is the only set \
-         vector whose input is NOT derived from its token, because a token \
-         spells each member once and a duplicate cannot be recovered from it.",
+         cell rather than a differently-written same one. NEITHER set-dedup vector derives \
+         its input from its token, because a token spells each member once \
+         and a duplicate cannot be recovered from it.",
         OpClasses::BASIC | OpClasses::ROTATE,
         Arith::NONE,
         &["b", "b", "w"],
+    ));
+
+    // ⚠️ The SAME rule, on a field with a DIFFERENT SPELLING. One vector
+    // could not stand for both: `<ops>` juxtaposes single letters, so a
+    // concatenating producer emits a DOUBLED LETTER (`ops-bbw`), while
+    // `<arith>` joins named parts with `-` and emits a REPEATED PART
+    // (`arith-f16-f16-i8`). The defect is one rule and two surfaces, and a
+    // reader who generalized from the `<ops>` vector would be generalizing
+    // from the spelling rather than from the rule.
+    //
+    // Found by review on #84, not by a gate: the `<arith>` field_spec note
+    // said ABSORBED while only `<ops>` carried a vector. The test now reads
+    // WHICH fields claim absorption and requires a vector for each, so a
+    // third such claim cannot arrive uncovered.
+    v.push(dedup_set_vector(
+        "arith",
+        "An input REPEATING a member, in the field whose members are NAMED \
+         rather than single letters. `<arith>` is a SET, so `f16` twice is \
+         absorbed and the token spells it once -- a producer that \
+         concatenated its input would emit `arith-f16-f16-i8`, which under \
+         §6.8-0002 is a different cell rather than a differently-written \
+         same one.",
+        OpClasses::NONE,
+        Arith::FLOAT16 | Arith::INT8,
+        &["f16", "f16", "i8"],
     ));
 
     v

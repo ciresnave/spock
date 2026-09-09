@@ -1469,51 +1469,92 @@ fn every_vector_input_carries_the_keys_input_shape_declares() {
 #[test]
 fn a_repeated_set_member_is_absorbed_and_a_vector_proves_it() {
     let text = committed();
-    let line = text
+
+    // ⚠️ WHICH fields need a vector is read from the manifest, not listed here.
+    // The previous version of this test found the FIRST `set-dedup` line and
+    // checked `<ops>`, so an `<arith>` absorption claim shipped with no vector
+    // and stayed green -- caught by review on #84, not by this gate. A
+    // hardcoded two-field list would close that instance and leave the third
+    // claim free to arrive uncovered.
+    let claimed: Vec<&str> = text
         .lines()
-        .find(|l| l.contains("\"pins\": \"set-dedup\""))
-        .expect(
-            "no vector pins `set-dedup`. Without one, a producer that concatenates \
-             its input instead of absorbing repeats emits `ops-bbw` and passes \
-             every other vector — under §6.8-0002 that is a different cell.",
+        .filter(|l| l.contains("\"input_shape\"") && l.contains("ABSORBED"))
+        .filter_map(|l| between(l, "\"field\": \"", "\""))
+        .collect();
+    assert!(
+        !claimed.is_empty(),
+        "no field_spec note claims a repeated member is ABSORBED. Either the \
+         rule left the prose -- in which case the vectors below pin behaviour \
+         no producer is told about -- or this check can no longer find the \
+         claim, and a check that cannot find its subject cannot fail."
+    );
+
+    for field in &claimed {
+        let needle = format!("\"pins\": \"set-dedup\", \"field\": \"{field}\"");
+        let line = text
+            .lines()
+            .find(|l| l.contains(&needle))
+            .unwrap_or_else(|| {
+                panic!(
+                    "the `{field}` field_spec note says a repeated member is \
+                 ABSORBED, and no vector pins it. A producer that concatenates \
+                 its input passes every vector while violating a documented \
+                 rule -- under §6.8-0002 `{field}` spelled twice is a different \
+                 cell, not a differently-written same one."
+                )
+            });
+
+        let raw = between(line, &format!("\"{field}\": ["), "]")
+            .unwrap_or_else(|| panic!("the `{field}` dedup vector carries no `{field}` input"));
+        let members: Vec<&str> = raw
+            .split(',')
+            .map(|m| m.trim().trim_matches('"'))
+            .filter(|m| !m.is_empty())
+            .collect();
+        let unique: std::collections::BTreeSet<&&str> = members.iter().collect();
+        assert!(
+            unique.len() < members.len(),
+            "the `{field}` set-dedup vector's input {members:?} carries no \
+             repeat, so it discriminates nothing: a concatenating producer and \
+             an absorbing one emit the same token from it."
         );
 
-    let ops = between(line, "\"ops\": [", "]").expect("the vector carries an ops input");
-    let members: Vec<&str> = ops.split(',').map(|s| s.trim().trim_matches('"')).collect();
-    let unique: std::collections::BTreeSet<&&str> = members.iter().collect();
-    assert!(
-        unique.len() < members.len(),
-        "the set-dedup vector's input {members:?} carries no repeat, so it \
-         discriminates nothing: a concatenating producer and an absorbing one \
-         emit the same token from it."
-    );
+        let token = between(line, "\"token\": \"", "\"")
+            .unwrap_or_else(|| panic!("the `{field}` dedup vector carries no token"));
+        let prefix = format!("{field}-");
+        let spelled = token
+            .split('.')
+            .find(|f| f.starts_with(&prefix))
+            .unwrap_or_else(|| panic!("the token spells no `{field}` field"))
+            .trim_start_matches(&prefix);
 
-    let token = between(line, "\"token\": \"", "\"").expect("token");
-    let spelled = token
-        .split('.')
-        .find(|f| f.starts_with("ops-"))
-        .expect("an ops field")
-        .trim_start_matches("ops-");
-    assert_eq!(
-        spelled.len(),
-        unique.len(),
-        "input {members:?} has {} distinct members but the token spells \
-         {spelled:?} ({} letters). A repeat must be ABSORBED, not concatenated.",
-        unique.len(),
-        spelled.len()
-    );
+        // ⚠️ The instrument states its own precondition. Counting a member's
+        // occurrences is only unambiguous while no member is a substring of
+        // another -- `arith_names` has no such pair today and `ops` is
+        // single letters, but a future name could make this silently wrong.
+        for a in &unique {
+            for b in &unique {
+                assert!(
+                    a == b || !b.contains(**a),
+                    "`{a}` is a substring of `{b}` in `{field}`, so counting \
+                     occurrences below cannot tell absorption from \
+                     concatenation. Split on the field's separator instead."
+                );
+            }
+        }
 
-    // ⚠️ And the prose must say so, because the vector alone leaves a reader
-    // inferring the rule from one example. This is the half a producer reads.
-    let note = text
-        .lines()
-        .find(|l| l.contains("\"field\": \"ops\"") && l.contains("\"input_shape\""))
-        .and_then(|l| between(l, "\"note\": \"", "\""))
-        .expect("the ops field_spec note");
-    assert!(
-        note.contains("ABSORBED"),
-        "the `ops` field_spec note does not say a repeated member is absorbed. \
-         The vector pins the behaviour; the note is what a producer reads before \
-         writing the code that would have to pass it."
-    );
+        // The whole property, in a form that does not need to know whether the
+        // field juxtaposes letters or joins named parts with `-`: each member
+        // appears EXACTLY ONCE. A concatenating producer spells the repeat
+        // twice -- `ops-bbw`, `arith-f16-f16-i8` -- and fails here.
+        for m in &unique {
+            let n = spelled.matches(**m).count();
+            assert_eq!(
+                n, 1,
+                "`{field}` input {members:?} has distinct members {unique:?}, \
+                 but the token spells `{spelled}`, which contains `{m}` {n} \
+                 times. A repeat must be ABSORBED, not concatenated."
+            );
+        }
+    }
 }
