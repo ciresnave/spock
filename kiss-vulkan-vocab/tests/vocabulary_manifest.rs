@@ -1454,3 +1454,127 @@ fn every_vector_input_carries_the_keys_input_shape_declares() {
         );
     }
 }
+
+/// A repeated set member must be absorbed, and a vector must prove it.
+///
+/// ⚠️ `field_spec` said "sorted and deduplicated" for `<coop>` and `<coopvec>`
+/// and said NOTHING about `<ops>`/`<arith>`, and NO vector carried a duplicate —
+/// so a producer that never deduplicated passed all seventeen. Found by a
+/// foreign party running exactly that producer, with a control mutation firing
+/// so the zero was a measurement rather than a non-run.
+///
+/// ⚠️ Their own producer wrote `set(vals)` and never recorded the choice. A
+/// DECLARED ledger fixes "a path nothing reaches" and does nothing for "a
+/// decision I made without seeing it as one" — `set(vals)` felt like typing.
+/// Every field whose `field_spec` note CLAIMS a repeated member is absorbed.
+///
+/// ⚠️ Read from the manifest rather than listed in the test. The previous
+/// version checked `<ops>` because `<ops>` was what it named, so an `<arith>`
+/// claim shipped with no vector and stayed green -- caught in review on #84.
+/// A hardcoded list closes that instance and leaves the third claim free.
+fn fields_claiming_absorption(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter(|l| l.contains("\"input_shape\"") && l.contains("ABSORBED"))
+        .filter_map(|l| between(l, "\"field\": \"", "\""))
+        .collect()
+}
+
+/// The DISTINCT members of a set-dedup vector's input, having checked that the
+/// input actually repeats one -- without a repeat the vector discriminates
+/// nothing, since a concatenating and an absorbing producer agree on it.
+fn dedup_vector_members(field: &str, line: &str) -> Vec<String> {
+    let raw = between(line, &format!("\"{field}\": ["), "]")
+        .unwrap_or_else(|| panic!("the `{field}` dedup vector carries no `{field}` input"));
+    let members: Vec<&str> = raw
+        .split(',')
+        .map(|m| m.trim().trim_matches('"'))
+        .filter(|m| !m.is_empty())
+        .collect();
+    let unique: std::collections::BTreeSet<&str> = members.iter().copied().collect();
+    assert!(
+        unique.len() < members.len(),
+        "the `{field}` set-dedup vector's input {members:?} carries no repeat, \
+         so it discriminates nothing: a concatenating producer and an absorbing \
+         one emit the same token from it."
+    );
+    unique.into_iter().map(str::to_string).collect()
+}
+
+/// ⚠️ The instrument states its own precondition. Counting a member's
+/// occurrences in the token tells absorption from concatenation only while no
+/// member is a substring of another. That holds for `arith_names` today and
+/// trivially for single letters, but a future name could make the count
+/// silently wrong -- so it is asserted rather than assumed.
+fn assert_members_are_mutually_distinguishable(field: &str, unique: &[String]) {
+    for a in unique {
+        for b in unique {
+            assert!(
+                a == b || !b.contains(a.as_str()),
+                "`{a}` is a substring of `{b}` in `{field}`, so counting \
+                 occurrences cannot tell absorption from concatenation. Split \
+                 on the field's separator instead."
+            );
+        }
+    }
+}
+
+/// The field's segment of a vector's token, with its `<field>-` prefix removed.
+fn spelled_field(field: &str, line: &str) -> String {
+    let token = between(line, "\"token\": \"", "\"")
+        .unwrap_or_else(|| panic!("the `{field}` dedup vector carries no token"));
+    let prefix = format!("{field}-");
+    token
+        .split('.')
+        .find(|f| f.starts_with(&prefix))
+        .unwrap_or_else(|| panic!("the token spells no `{field}` field"))
+        .trim_start_matches(&prefix)
+        .to_string()
+}
+
+#[test]
+fn a_repeated_set_member_is_absorbed_and_a_vector_proves_it() {
+    let text = committed();
+
+    let claimed = fields_claiming_absorption(&text);
+    assert!(
+        !claimed.is_empty(),
+        "no field_spec note claims a repeated member is ABSORBED. Either the \
+         rule left the prose -- in which case the vectors below pin behaviour \
+         no producer is told about -- or this check can no longer find the \
+         claim, and a check that cannot find its subject cannot fail."
+    );
+
+    for field in &claimed {
+        let needle = format!("\"pins\": \"set-dedup\", \"field\": \"{field}\"");
+        let line = text
+            .lines()
+            .find(|l| l.contains(&needle))
+            .unwrap_or_else(|| {
+                panic!(
+                    "the `{field}` field_spec note says a repeated member is \
+                 ABSORBED, and no vector pins it. A producer that concatenates \
+                 its input passes every vector while violating a documented \
+                 rule -- under §6.8-0002 `{field}` spelled twice is a different \
+                 cell, not a differently-written same one."
+                )
+            });
+
+        let unique = dedup_vector_members(field, line);
+        assert_members_are_mutually_distinguishable(field, &unique);
+
+        // The whole property, in a form that need not know whether the field
+        // juxtaposes letters or joins named parts with `-`: each member appears
+        // EXACTLY ONCE. A concatenating producer spells the repeat twice --
+        // `ops-bbw`, `arith-f16-f16-i8` -- and fails here.
+        let spelled = spelled_field(field, line);
+        for m in &unique {
+            let n = spelled.matches(m.as_str()).count();
+            assert_eq!(
+                n, 1,
+                "`{field}` distinct members {unique:?} but the token spells \
+                 `{spelled}`, which contains `{m}` {n} times. A repeat must be \
+                 ABSORBED, not concatenated."
+            );
+        }
+    }
+}
