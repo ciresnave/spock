@@ -260,6 +260,12 @@ def packaged_files(crate_dir: str) -> set[str]:
     walk flags every file cargo deliberately excludes, and `target/` alone would
     bury the finding.
     """
+    # !! `--allow-dirty` because the SUBJECT IS THE WORKING TREE. Without it
+    # cargo refuses outright when anything is uncommitted -- and the gate would
+    # then fail for every local user with work in progress, which is exactly
+    # who needs it before a publish. CI never sees this: it checks out clean,
+    # so the check's environment differs from the one that matters.
+    #
     # !! No `-p <name>`: running in the crate's own directory selects it, so
     # NOTHING VARIABLE REACHES argv. An earlier version validated the name
     # against cargo's identifier rules instead, which is strictly weaker -- a
@@ -270,7 +276,7 @@ def packaged_files(crate_dir: str) -> set[str]:
     # absolute path resolved for the literal "cargo", which is why it is not a
     # static string, and every other element IS one.
     out = subprocess.run(  # nosec B603 # nosemgrep
-        [cargo_path(), "package", "--quiet", "--list"],
+        [cargo_path(), "package", "--quiet", "--list", "--allow-dirty"],
         cwd=crate_dir, capture_output=True, text=True, encoding="utf-8",
     )
     if out.returncode != 0:
@@ -280,8 +286,28 @@ def packaged_files(crate_dir: str) -> set[str]:
             if ln.strip() and ln.strip() not in GENERATED}
 
 
+def find_in_tree(tree_dir: str, rel: str, fallback_root: str | None) -> str | None:
+    """Where a packaged file actually lives, or None if nowhere readable.
+
+    !! A path in `cargo package --list` is not necessarily a path under the
+    crate directory. `vulkane` declares `readme = "README.md"` and has none of
+    its own -- cargo packages the WORKSPACE readme under that name. Assuming
+    otherwise made this crash on any SERVED member with an inherited file,
+    which is the one condition the gate exists to detect.
+    """
+    direct = os.path.join(tree_dir, *rel.split("/"))
+    if os.path.exists(direct):
+        return direct
+    if fallback_root:
+        inherited = os.path.join(fallback_root, *rel.split("/"))
+        if os.path.exists(inherited):
+            return inherited
+    return None
+
+
 def compare(published_dir: str, tree_dir: str,
-            tree_listing: set[str] | None = None) -> tuple[list[tuple], int]:
+            tree_listing: set[str] | None = None,
+            fallback_root: str | None = None) -> tuple[list[tuple], int]:
     """Authored files only, walked SYMMETRICALLY.
 
     !! The union of both sides, not the tarball's side. Walking only what was
@@ -298,8 +324,8 @@ def compare(published_dir: str, tree_dir: str,
     tree = tree_listing if tree_listing is not None else shipped_files(tree_dir)
     for rel in sorted(published | tree):
         p = os.path.join(published_dir, *rel.split("/"))
-        t = os.path.join(tree_dir, *rel.split("/"))
-        if rel not in tree:
+        t = find_in_tree(tree_dir, rel, fallback_root)
+        if rel not in tree or t is None:
             findings.append((rel, ABSENT_FROM_TREE, 0, 0))
         elif rel not in published:
             findings.append((rel, ABSENT_FROM_ARTIFACT, 0, 0))
@@ -537,6 +563,34 @@ def walk_arms(check, tmp: str) -> None:
     check("a file the tree has and the tarball lacks is flagged",
           kinds == [ABSENT_FROM_ARTIFACT, ABSENT_FROM_TREE] and checked == 3)
 
+    # -- A PACKAGED PATH NEED NOT LIVE UNDER THE CRATE DIRECTORY ------------
+    # `vulkane` declares `readme = "README.md"` and has none of its own, so
+    # cargo packages the WORKSPACE readme under that name. Reading it from the
+    # crate directory raised FileNotFoundError -- and only for a SERVED member,
+    # since an UNPUBLISHED one is never compared. The gate crashed on the one
+    # condition it exists to detect.
+    ws = os.path.join(tmp, "ws")
+    os.makedirs(ws)
+    io.open(os.path.join(pub, "README.md"), "wb").write(b"shared\n")
+    io.open(os.path.join(ws, "README.md"), "wb").write(b"shared\n")
+    found, checked = compare(pub, tree, {"src/lib.rs", "README.md"},
+                             fallback_root=ws)
+    # Assert about README specifically rather than a total: these fixtures
+    # accumulate files across arms, so an exact count would encode the order
+    # the arms happen to run in rather than the property under test.
+    check("a packaged file inherited from the workspace root is compared",
+          not any(f[0] == "README.md" for f in found) and checked >= 2)
+
+    # ...and when it is nowhere, it is REPORTED rather than raising.
+    io.open(os.path.join(pub, "LICENSE-MIT"), "wb").write(b"x\n")
+    found, checked = compare(pub, tree,
+                             {"src/lib.rs", "README.md", "LICENSE-MIT"},
+                             fallback_root=ws)
+    check("a packaged file readable nowhere is flagged, not raised",
+          any(f[0] == "LICENSE-MIT" and f[1] == ABSENT_FROM_TREE for f in found))
+    os.remove(os.path.join(pub, "LICENSE-MIT"))
+    os.remove(os.path.join(pub, "README.md"))
+
     # -- THE DEFECT THIS WALK WIDTH EXISTS FOR ------------------------------
     # A `src/`-only walk compared 1 of 14 packaged files on kiss-vulkan-vocab,
     # skipping manifest/vulkan-vocabulary.json -- the normative artifact that
@@ -678,7 +732,8 @@ def main() -> int:
             else:
                 d = fetch(name, version, tmp)
                 findings, checked = compare(
-                    d, tree_dir, packaged_files(tree_dir))
+                    d, tree_dir, packaged_files(tree_dir),
+                    fallback_root=args.manifest_dir)
                 rows.append((name, version, "SERVED", checked, findings))
 
     return report(rows, args.gate)
