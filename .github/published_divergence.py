@@ -100,7 +100,11 @@ def members(manifest_dir: str) -> list[tuple[str, str, str]]:
 
     From `cargo metadata`, never from Cargo.lock.
     """
-    out = subprocess.run(  # nosec B603 - absolute path, literal argv, no shell
+    # nosemgrep - argv[0] is NOT a static string ON PURPOSE: it is the
+    # absolute path `shutil.which` resolved for the literal name "cargo",
+    # which is strictly more determinate than the bare name this rule would
+    # accept. The tail is literal and there is no shell.
+    out = subprocess.run(  # nosec B603 # nosemgrep
         [cargo_path(), "metadata", "--no-deps", "--format-version", "1"],
         cwd=manifest_dir, capture_output=True, text=True, encoding="utf-8",
     )
@@ -130,7 +134,12 @@ def registry_get(url: str, timeout: int):
     req = urllib.request.Request(url, headers=UA)
     # nosec B310 - the registry prefix is asserted immediately above, so the
     # scheme cannot be file:// or any other opener the value might name.
-    return urllib.request.urlopen(req, timeout=timeout)  # nosec B310
+    # nosemgrep - the dynamic part cannot select a scheme: the assertion
+    # above rejects anything not prefixed with the literal https REGISTRY,
+    # so file:// and every other opener are unreachable. Verified both
+    # ways: file:///etc/passwd and https://evil.example refused, the real
+    # registry URL allowed.
+    return urllib.request.urlopen(req, timeout=timeout)  # nosec B310 # nosemgrep
 
 
 def served(name: str) -> set[str] | None:
@@ -526,7 +535,10 @@ def cargo_arm(check, tmp: str) -> None:
     if not found:
         answer, rc = "NOTHING (cargo is not on PATH)", 1
     else:
-        ver = subprocess.run(  # nosec B603 - absolute path, literal argv
+        # nosemgrep - same as above: `found` is the absolute path resolved
+        # for the literal name "cargo", and the arm PRINTS it so a reader
+        # can see which binary answered.
+        ver = subprocess.run(  # nosec B603 # nosemgrep
             [found, "--version"], capture_output=True, text=True,
             encoding="utf-8")
         answer, rc = (ver.stdout or ver.stderr).strip(), ver.returncode
