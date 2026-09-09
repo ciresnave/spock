@@ -98,11 +98,24 @@ def members(manifest_dir: str) -> list[tuple[str, str, str]]:
     ]
 
 
+def registry_get(url: str, timeout: int):
+    """Open a URL that must be on the registry, asserting the scheme.
+
+    !! `urllib` honours `file://` and any custom scheme its openers know, so
+    "it is an https constant plus a crate name" is a fact about crate-name
+    syntax rather than a property of this call. The prefix is checked instead,
+    which makes the reachable surface a statement in the code.
+    """
+    if not url.startswith(REGISTRY + "/"):
+        raise SystemExit("refusing a URL outside the registry: %r" % url)
+    req = urllib.request.Request(url, headers=UA)
+    return urllib.request.urlopen(req, timeout=timeout)  # noqa: S310
+
+
 def served(name: str) -> set[str] | None:
     """Versions the registry serves. None means the crate was never published."""
     try:
-        req = urllib.request.Request("%s/%s" % (REGISTRY, name), headers=UA)
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with registry_get("%s/%s" % (REGISTRY, name), 60) as r:
             return {v["num"] for v in json.load(r)["versions"]}
     except urllib.error.HTTPError as e:
         if e.code == 404:
@@ -131,8 +144,7 @@ def reject_unsafe_members(t: tarfile.TarFile) -> None:
 
 def fetch(name: str, version: str, into: str) -> str:
     url = "%s/%s/%s/download" % (REGISTRY, name, version)
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=180) as r:
+    with registry_get(url, 180) as r:
         blob = r.read()
     path = os.path.join(into, "%s-%s.crate" % (name, version))
     io.open(path, "wb").write(blob)
@@ -220,23 +232,16 @@ def compare(published_dir: str, tree_dir: str) -> tuple[list[tuple], int]:
     return findings, len(published | tree)
 
 
-def report(rows: list[tuple], gate: bool) -> int:
-    """Print the table and decide the exit code.
-
-    Split out of `main` so the exit-code rules can be exercised with fabricated
-    rows -- no network, no cargo, no registry. The anti-vacuous guard below is
-    the one line that decides whether this file is a gate or a decoration, and
-    a guard whose only proof lived in a throwaway directory is a guard nobody
-    can re-check later.
-    """
+def print_rows(rows: list[tuple]) -> tuple[list[str], list[str]]:
+    """Print the table. Returns (diverged, unscanned) by crate name."""
     print("  %-22s %-10s %-16s %6s  %s"
           % ("crate", "version", "string", "files", "verdict"))
     diverged, unscanned = [], []
     for name, version, state, checked, findings in rows:
         # !! A crate on a SERVED string compared over ZERO files is not clean,
-        # it is UNSCANNED. This is the same rule as the empty member list
-        # below, one level down -- and I had guarded the empty MEMBER LIST
-        # while leaving the empty FILE SET reading as agreement. Found by
+        # it is UNSCANNED. This is the same rule as the empty member list in
+        # `report` below, one level down -- and I had guarded the empty MEMBER
+        # LIST while leaving the empty FILE SET reading as agreement. Found by
         # review on #85, which is the second time this file's own anti-vacuous
         # rule was applied at one level and not the other.
         blind = state == "SERVED" and checked == 0
@@ -247,22 +252,22 @@ def report(rows: list[tuple], gate: bool) -> int:
             diverged.append(name)
         print("  %-22s %-10s %-16s %6d  %s"
               % (name, version, state, checked, verdict))
-        for rel, hunks, rem, add in findings:
-            if hunks == ABSENT_FROM_TREE:
-                print("  %52s %s  (absent from the tree)" % ("", rel))
-            elif hunks == ABSENT_FROM_ARTIFACT:
-                print("  %52s %s  (absent from the published artifact)"
-                      % ("", rel))
-            else:
-                print("  %52s %s  %d hunks, -%d/+%d" % ("", rel, hunks, rem, add))
+        print_findings(findings)
+    return diverged, unscanned
 
-    # A scan that matched nothing must FAIL, not pass. An empty member list and
-    # a clean workspace produce identical silence otherwise, and the empty one
-    # is the dangerous reading: it says "checked, all fine" about zero crates.
-    if not rows:
-        print("\n  !! no publishable members found -- the scan did not run.")
-        return 1
 
+def print_findings(findings: list[tuple]) -> None:
+    for rel, hunks, rem, add in findings:
+        if hunks == ABSENT_FROM_TREE:
+            print("  %52s %s  (absent from the tree)" % ("", rel))
+        elif hunks == ABSENT_FROM_ARTIFACT:
+            print("  %52s %s  (absent from the published artifact)" % ("", rel))
+        else:
+            print("  %52s %s  %d hunks, -%d/+%d" % ("", rel, hunks, rem, add))
+
+
+def print_control(rows: list[tuple]) -> None:
+    """Say whether an all-ok result could be distinguished from a broken one."""
     controls = [r for r in rows if r[2] in ("UNPUBLISHED", "NEVER-PUBLISHED")]
     print()
     if controls:
@@ -273,6 +278,27 @@ def report(rows: list[tuple], gate: bool) -> int:
         print("  !! NO in-tree control: every member sits on a served version, so an")
         print("     all-ok result cannot be distinguished from a broken comparator.")
         print("     Bump one member post-publish to get a known-green row.")
+
+
+def report(rows: list[tuple], gate: bool) -> int:
+    """Print the table and decide the exit code.
+
+    Split out of `main` so the exit-code rules can be exercised with fabricated
+    rows -- no network, no cargo, no registry. The anti-vacuous guard below is
+    the one line that decides whether this file is a gate or a decoration, and
+    a guard whose only proof lived in a throwaway directory is a guard nobody
+    can re-check later.
+    """
+    diverged, unscanned = print_rows(rows)
+
+    # A scan that matched nothing must FAIL, not pass. An empty member list and
+    # a clean workspace produce identical silence otherwise, and the empty one
+    # is the dangerous reading: it says "checked, all fine" about zero crates.
+    if not rows:
+        print("\n  !! no publishable members found -- the scan did not run.")
+        return 1
+
+    print_control(rows)
 
     if unscanned:
         print()
@@ -291,72 +317,69 @@ def report(rows: list[tuple], gate: bool) -> int:
         print("  the difference is one consumers should receive -- measure that, do not")
         print("  assume it: identical sources are not required for identical behaviour,")
         print("  and differing sources do not imply differing output.")
+
     if (diverged or unscanned) and gate:
         return 1
     return 0
 
 
-def self_test() -> int:
-    """Each arm below was run against a deliberately broken version of the code
-    it checks, and failed there, before being kept.
+# --------------------------------------------------------------------------
+# self-test
+#
+# Every arm below was run against a deliberately broken version of the code it
+# checks, and failed there, before being kept. The drill is re-run from scratch
+# after any refactor: arms that were red against the old code prove nothing
+# about the new one, and this file has already had one gate stop being able to
+# fail while looking unchanged.
+#
+# Grouped into functions because they check unrelated things, and because a
+# single 100-line self-test hides which group a failure came from.
+# --------------------------------------------------------------------------
+
+def exit_code_arms(check) -> None:
+    """The exit-code rules, over fabricated rows. No network, no cargo.
 
     Every arm that expects a ZERO is downstream of the vacuous guard, so
-    breaking that one guard reddens several arms at once; that is correct
-    and not a redundancy to trim.
-
-    Offline by construction except the last arm, which needs `cargo metadata`
-    and says so. The point of keeping them here rather than in a scratch
-    directory is the vacuous-scan path: a healthy workspace can never reach it,
-    so nothing else will ever exercise it, and an unexercised guard is
-    indistinguishable from an absent one.
+    breaking that one guard reddens several arms at once; that is correct and
+    not a redundancy to trim.
     """
-    failures = []
-
-    def check(name, ok):
-        print("  %-4s %s" % ("ok" if ok else "FAIL", name))
-        if not ok:
-            failures.append(name)
-
     quiet = io.StringIO()
 
     def code(rows, gate):
         with contextlib.redirect_stdout(quiet):
             return report(rows, gate)
 
-    CLEAN = [("a", "1.0.0", "SERVED", 12, []),
+    clean = [("a", "1.0.0", "SERVED", 12, []),
              ("b", "2.0.0", "UNPUBLISHED", 0, [])]
-    BLIND = [("a", "1.0.0", "SERVED", 0, [])]
-    DIRTY = CLEAN + [("c", "3.0.0", "SERVED", 4, [("src/lib.rs", 2, 5, 5)])]
+    dirty = clean + [("c", "3.0.0", "SERVED", 4, [("src/lib.rs", 2, 5, 5)])]
+    blind = [("a", "1.0.0", "SERVED", 0, [])]
 
-    # -- the anti-vacuous guard, in BOTH modes ------------------------------
     # Report mode is where this lands first, so a vacuous scan has to fail
     # there too; otherwise the unarmed period is one in which the check cannot
     # report its own absence.
     check("an empty scan fails in report mode", code([], False) == 1)
     check("an empty scan fails in gate mode", code([], True) == 1)
+    # ...and its control: without this the guard could be an unconditional
+    # `return 1` and both arms above would still read as passes.
+    check("a clean non-empty scan passes when armed", code(clean, True) == 0)
 
-    # -- and its control: a NON-empty clean scan must still pass -------------
-    # Without this the guard could be an unconditional `return 1` and both
-    # arms above would still read as passes.
-    check("a clean non-empty scan passes when armed", code(CLEAN, True) == 0)
-
-    # -- mode discrimination -------------------------------------------------
     check("a divergence reports without blocking when unarmed",
-          code(DIRTY, False) == 0)
-    check("the same divergence blocks when armed", code(DIRTY, True) == 1)
+          code(dirty, False) == 0)
+    check("the same divergence blocks when armed", code(dirty, True) == 1)
 
-    # -- the per-crate blindness, which is the row-level guard one level down -
     check("a SERVED crate compared over zero files does not read clean",
-          code(BLIND, True) == 1)
+          code(blind, True) == 1)
     check("...and it reports without blocking when unarmed",
-          code(BLIND, False) == 0)
-    # An UNPUBLISHED crate legitimately compares zero files -- it has no
-    # artifact to compare against -- so the guard must NOT fire there, or every
-    # correctly-bumped member would red.
+          code(blind, False) == 0)
+    # An UNPUBLISHED crate compares zero files quite legitimately -- it has no
+    # artifact to compare against -- so a guard firing on ANY zero would red
+    # every correctly-bumped member, which is the remedy this gate encourages.
     check("an UNPUBLISHED crate at zero files is still clean",
           code([("b", "2.0.0", "UNPUBLISHED", 0, [])], True) == 0)
 
-    # -- which members claim a crates.io string ----------------------------
+
+def publish_filter_arms(check) -> None:
+    """Which `publish` spellings claim a crates.io string."""
     for publish, want, why in ((None, True, "the default: publish anywhere"),
                                ([], False, "`publish = false`"),
                                (["crates-io"], True, "explicitly allowed here"),
@@ -364,128 +387,155 @@ def self_test() -> int:
         check("publish=%-17r -> %-5s (%s)" % (publish, want, why),
               publishes_to_crates_io(publish) == want)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        crlf = os.path.join(tmp, "crlf.rs")
-        lf = os.path.join(tmp, "lf.rs")
-        other = os.path.join(tmp, "other.rs")
-        io.open(crlf, "wb").write(b"fn a() {}\r\nfn b() {}\r\n")
-        io.open(lf, "wb").write(b"fn a() {}\nfn b() {}\n")
-        io.open(other, "wb").write(b"fn a() {}\nfn c() {}\n")
 
-        # !! The fixture must be verified before the arm that uses it means
-        # anything. A CRLF control whose "CRLF" file carries no CR passes for
-        # the wrong reason -- the normalizer is never exercised and the arm
-        # reports success. Read as bytes: this box has at least one CR
-        # detector that answers identically on pure-LF and pure-CRLF input.
-        raw_crlf = io.open(crlf, "rb").read()
-        raw_lf = io.open(lf, "rb").read()
-        check("the CRLF fixture actually carries CR and the LF one does not",
-              raw_crlf.count(b"\r\n") == 2 and raw_lf.count(b"\r") == 0)
+def comparison_arms(check, tmp: str) -> None:
+    """Line endings, byte fidelity, and the diff instrument."""
+    crlf = os.path.join(tmp, "crlf.rs")
+    lf = os.path.join(tmp, "lf.rs")
+    other = os.path.join(tmp, "other.rs")
+    io.open(crlf, "wb").write(b"fn a() {}\r\nfn b() {}\r\n")
+    io.open(lf, "wb").write(b"fn a() {}\nfn b() {}\n")
+    io.open(other, "wb").write(b"fn a() {}\nfn c() {}\n")
 
-        # A comparison that fires on every file is a comparison nobody reads,
-        # and on a Windows checkout line endings alone produce exactly that.
-        check("line endings alone are not a difference", lines(crlf) == lines(lf))
-        # ...and its control, or the normalizer could be returning a constant.
-        check("a real difference survives normalization", lines(lf) != lines(other))
+    # !! The fixture must be verified before the arm that uses it means
+    # anything. A CRLF control whose "CRLF" file carries no CR passes for the
+    # wrong reason -- the normalizer is never exercised and the arm reports
+    # success. Read as bytes: this box has at least one CR detector that
+    # answers identically on pure-LF and pure-CRLF input, and WHICH detectors
+    # are blind turns out to differ between sessions on one machine.
+    raw_crlf = io.open(crlf, "rb").read()
+    raw_lf = io.open(lf, "rb").read()
+    check("the CRLF fixture actually carries CR and the LF one does not",
+          raw_crlf.count(b"\r\n") == 2 and raw_lf.count(b"\r") == 0)
 
-        # `edit_size` must not be a positional walk. Every line after the
-        # insertion shifts, so a zip-and-count says 3; the answer is 1 hunk of
-        # 1 added line. Both numbers are computed here, so the docstring's
-        # claim about the two instruments is checked rather than asserted.
-        a = ["one", "two", "three", "four"]
-        b = ["one", "INSERTED", "two", "three", "four"]
-        hunks, rem, add = edit_size(a, b)
-        positional = sum(1 for x, y in zip(a, b) if x != y)
-        check("an insertion is one hunk, not everything downstream",
-              (hunks, rem, add) == (1, 0, 1) and positional == 3)
+    # A comparison that fires on every file is one nobody reads, and on a
+    # Windows checkout line endings alone produce exactly that.
+    check("line endings alone are not a difference", lines(crlf) == lines(lf))
+    # ...and its control, or the normalizer could be returning a constant.
+    check("a real difference survives normalization", lines(lf) != lines(other))
 
-        pub, tree = os.path.join(tmp, "pub"), os.path.join(tmp, "tree")
-        os.makedirs(os.path.join(pub, "src"))
-        os.makedirs(os.path.join(tree, "src"))
-        io.open(os.path.join(pub, "src", "lib.rs"), "wb").write(b"same\n")
-        io.open(os.path.join(tree, "src", "lib.rs"), "wb").write(b"same\n")
-        found, checked = compare(pub, tree)
-        check("identical sources yield no findings, over a nonzero file count",
-              found == [] and checked == 1)
+    # `edit_size` must not be a positional walk. Every line after the insertion
+    # shifts, so a zip-and-count says 3; the answer is 1 hunk of 1 added line.
+    # Both numbers are computed here, so the docstring's claim about the two
+    # instruments is checked rather than asserted.
+    a = ["one", "two", "three", "four"]
+    b = ["one", "INSERTED", "two", "three", "four"]
+    hunks, rem, add = edit_size(a, b)
+    positional = sum(1 for x, y in zip(a, b) if x != y)
+    check("an insertion is one hunk, not everything downstream",
+          (hunks, rem, add) == (1, 0, 1) and positional == 3)
 
-        io.open(os.path.join(pub, "src", "gone.rs"), "wb").write(b"x\n")
-        found, checked = compare(pub, tree)
-        check("a file the tarball has and the tree lacks is flagged",
-              len(found) == 1 and found[0][1] == ABSENT_FROM_TREE and checked == 2)
+    # Two DIFFERENT invalid UTF-8 sequences decode to the same U+FFFD, so a
+    # decoding comparator calls these files equal.
+    bad_a, bad_b = os.path.join(tmp, "ba.rs"), os.path.join(tmp, "bb.rs")
+    io.open(bad_a, "wb").write(b"x = \xff\n")
+    io.open(bad_b, "wb").write(b"x = \xfe\n")
+    check("distinct invalid UTF-8 bytes are not collapsed together",
+          lines(bad_a) != lines(bad_b))
 
-        # ...and the other direction, which the tarball-only walk could not see:
-        # a file ADDED to the workspace is the commonest way a tree moves ahead
-        # of its release, and it was reported as `ok`.
-        io.open(os.path.join(tree, "src", "added.rs"), "wb").write(b"y\n")
-        found, checked = compare(pub, tree)
-        kinds = sorted(f[1] for f in found)
-        check("a file the tree has and the tarball lacks is flagged",
-              kinds == [ABSENT_FROM_ARTIFACT, ABSENT_FROM_TREE] and checked == 3)
 
-        # -- bytes, not replacement characters ---------------------------
-        # Two DIFFERENT invalid UTF-8 sequences decode to the same U+FFFD, so a
-        # decoding comparator calls these files equal.
-        bad_a, bad_b = os.path.join(tmp, "ba.rs"), os.path.join(tmp, "bb.rs")
-        io.open(bad_a, "wb").write(b"x = \xff\n")
-        io.open(bad_b, "wb").write(b"x = \xfe\n")
-        check("distinct invalid UTF-8 bytes are not collapsed together",
-              lines(bad_a) != lines(bad_b))
+def walk_arms(check, tmp: str) -> None:
+    """The file walk, in both directions."""
+    pub, tree = os.path.join(tmp, "pub"), os.path.join(tmp, "tree")
+    os.makedirs(os.path.join(pub, "src"))
+    os.makedirs(os.path.join(tree, "src"))
+    io.open(os.path.join(pub, "src", "lib.rs"), "wb").write(b"same\n")
+    io.open(os.path.join(tree, "src", "lib.rs"), "wb").write(b"same\n")
+    found, checked = compare(pub, tree)
+    check("identical sources yield no findings, over a nonzero file count",
+          found == [] and checked == 1)
 
-        # -- the tarball guard, on every Python version ------------------
-        payload = os.path.join(tmp, "payload")
-        io.open(payload, "wb").write(b"x")
-        evil = os.path.join(tmp, "evil.tar.gz")
-        with tarfile.open(evil, "w:gz") as w:
-            info = w.gettarinfo(payload, arcname="../escaped.txt")
+    io.open(os.path.join(pub, "src", "gone.rs"), "wb").write(b"x\n")
+    found, checked = compare(pub, tree)
+    check("a file the tarball has and the tree lacks is flagged",
+          len(found) == 1 and found[0][1] == ABSENT_FROM_TREE and checked == 2)
+
+    # ...and the other direction, which the tarball-only walk could not see: a
+    # file ADDED to the workspace is the commonest way a tree moves ahead of
+    # its release, and it was reported as `ok`.
+    io.open(os.path.join(tree, "src", "added.rs"), "wb").write(b"y\n")
+    found, checked = compare(pub, tree)
+    kinds = sorted(f[1] for f in found)
+    check("a file the tree has and the tarball lacks is flagged",
+          kinds == [ABSENT_FROM_ARTIFACT, ABSENT_FROM_TREE] and checked == 3)
+
+
+def tarball_arms(check, tmp: str) -> None:
+    """The extraction guard, which runs on every Python version."""
+    payload = os.path.join(tmp, "payload")
+    io.open(payload, "wb").write(b"x")
+
+    def build(path, arcname):
+        with tarfile.open(path, "w:gz") as w:
+            info = w.gettarinfo(payload, arcname=arcname)
             with io.open(payload, "rb") as fh:
                 w.addfile(info, fh)
-        safe = os.path.join(tmp, "safe.tar.gz")
-        with tarfile.open(safe, "w:gz") as w:
-            info = w.gettarinfo(payload, arcname="crate-1.0.0/src/lib.rs")
-            with io.open(payload, "rb") as fh:
-                w.addfile(info, fh)
+        return path
 
-        def refused(archive):
-            try:
-                with tarfile.open(archive, "r:gz") as r:
-                    reject_unsafe_members(r)
-                return False
-            except SystemExit:
-                return True
-
-        check("a tarball member escaping the directory is refused",
-              refused(evil))
-        # ...and the control, or the guard could be refusing everything.
-        check("an ordinary tarball member is not refused", not refused(safe))
-
-        # -- the one arm that needs a toolchain ----------------------------
-        # `cargo metadata --no-deps` does not resolve dependencies, so this
-        # stays offline. It answers first: a result from a cargo that never
-        # identified itself says nothing about which cargo produced it.
-        # A missing cargo must say so in its own words. Left bare it raises
-        # FileNotFoundError and the arm reds with a traceback, which reads as a
-        # defect in this file rather than as a runner without a toolchain --
-        # and this job installs none, relying on the image providing one.
+    def refused(archive):
         try:
-            ver = subprocess.run(["cargo", "--version"], capture_output=True,
-                                 text=True, encoding="utf-8")
-            answer = (ver.stdout or ver.stderr).strip()
-            rc = ver.returncode
-        except OSError as e:
-            answer, rc = "NOTHING (%s)" % e.__class__.__name__, 1
-        print("  --   cargo answers: %s" % (answer or "NOTHING"))
-        if rc != 0:
-            print("       ^ this arm needs a toolchain on the runner; add one to")
-            print("         the job rather than reading the failure as a code defect.")
-        ws = os.path.join(tmp, "ws")
-        os.makedirs(os.path.join(ws, "src"))
-        io.open(os.path.join(ws, "Cargo.toml"), "w", encoding="utf-8").write(
-            '[package]\nname = "unpublishable"\nversion = "0.1.0"\n'
-            'edition = "2021"\npublish = false\n\n[workspace]\n')
-        io.open(os.path.join(ws, "src", "main.rs"), "w",
-                encoding="utf-8").write("fn main() {}\n")
-        check("a `publish = false` member is not a candidate",
-              rc == 0 and members(ws) == [])
+            with tarfile.open(archive, "r:gz") as r:
+                reject_unsafe_members(r)
+            return False
+        except SystemExit:
+            return True
+
+    evil = build(os.path.join(tmp, "evil.tar.gz"), "../escaped.txt")
+    safe = build(os.path.join(tmp, "safe.tar.gz"), "crate-1.0.0/src/lib.rs")
+    check("a tarball member escaping the directory is refused", refused(evil))
+    # ...and the control, or the guard could be refusing everything.
+    check("an ordinary tarball member is not refused", not refused(safe))
+
+
+def cargo_arm(check, tmp: str) -> None:
+    """The one arm that needs a toolchain.
+
+    `cargo metadata --no-deps` does not resolve dependencies, so this stays
+    offline. It answers first: a result from a cargo that never identified
+    itself says nothing about which cargo produced it.
+    """
+    # A missing cargo must say so in its own words. Left bare it raises
+    # FileNotFoundError and the arm reds with a traceback, which reads as a
+    # defect in this file rather than as a runner without a toolchain -- and
+    # this job installs none, relying on the image providing one.
+    try:
+        ver = subprocess.run(["cargo", "--version"], capture_output=True,
+                             text=True, encoding="utf-8")
+        answer, rc = (ver.stdout or ver.stderr).strip(), ver.returncode
+    except OSError as e:
+        answer, rc = "NOTHING (%s)" % e.__class__.__name__, 1
+    print("  --   cargo answers: %s" % (answer or "NOTHING"))
+    if rc != 0:
+        print("       ^ this arm needs a toolchain on the runner; add one to")
+        print("         the job rather than reading the failure as a code defect.")
+
+    ws = os.path.join(tmp, "ws")
+    os.makedirs(os.path.join(ws, "src"))
+    io.open(os.path.join(ws, "Cargo.toml"), "w", encoding="utf-8").write(
+        '[package]\nname = "unpublishable"\nversion = "0.1.0"\n'
+        'edition = "2021"\npublish = false\n\n[workspace]\n')
+    io.open(os.path.join(ws, "src", "main.rs"), "w",
+            encoding="utf-8").write("fn main() {}\n")
+    check("a `publish = false` member is not a candidate",
+          rc == 0 and members(ws) == [])
+
+
+def self_test() -> int:
+    """Run every arm. Offline except the last, which says so."""
+    failures = []
+
+    def check(name, ok):
+        print("  %-4s %s" % ("ok" if ok else "FAIL", name))
+        if not ok:
+            failures.append(name)
+
+    exit_code_arms(check)
+    publish_filter_arms(check)
+    with tempfile.TemporaryDirectory() as tmp:
+        comparison_arms(check, tmp)
+        walk_arms(check, tmp)
+        tarball_arms(check, tmp)
+        cargo_arm(check, tmp)
 
     if failures:
         print("\n  self-test FAILED: %s" % "; ".join(failures))
