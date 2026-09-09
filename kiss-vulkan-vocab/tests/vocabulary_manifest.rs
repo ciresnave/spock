@@ -1454,3 +1454,66 @@ fn every_vector_input_carries_the_keys_input_shape_declares() {
         );
     }
 }
+
+/// A repeated set member must be absorbed, and a vector must prove it.
+///
+/// ⚠️ `field_spec` said "sorted and deduplicated" for `<coop>` and `<coopvec>`
+/// and said NOTHING about `<ops>`/`<arith>`, and NO vector carried a duplicate —
+/// so a producer that never deduplicated passed all seventeen. Found by a
+/// foreign party running exactly that producer, with a control mutation firing
+/// so the zero was a measurement rather than a non-run.
+///
+/// ⚠️ Their own producer wrote `set(vals)` and never recorded the choice. A
+/// DECLARED ledger fixes "a path nothing reaches" and does nothing for "a
+/// decision I made without seeing it as one" — `set(vals)` felt like typing.
+#[test]
+fn a_repeated_set_member_is_absorbed_and_a_vector_proves_it() {
+    let text = committed();
+    let line = text
+        .lines()
+        .find(|l| l.contains("\"pins\": \"set-dedup\""))
+        .expect(
+            "no vector pins `set-dedup`. Without one, a producer that concatenates \
+             its input instead of absorbing repeats emits `ops-bbw` and passes \
+             every other vector — under §6.8-0002 that is a different cell.",
+        );
+
+    let ops = between(line, "\"ops\": [", "]").expect("the vector carries an ops input");
+    let members: Vec<&str> = ops.split(',').map(|s| s.trim().trim_matches('"')).collect();
+    let unique: std::collections::BTreeSet<&&str> = members.iter().collect();
+    assert!(
+        unique.len() < members.len(),
+        "the set-dedup vector's input {members:?} carries no repeat, so it \
+         discriminates nothing: a concatenating producer and an absorbing one \
+         emit the same token from it."
+    );
+
+    let token = between(line, "\"token\": \"", "\"").expect("token");
+    let spelled = token
+        .split('.')
+        .find(|f| f.starts_with("ops-"))
+        .expect("an ops field")
+        .trim_start_matches("ops-");
+    assert_eq!(
+        spelled.len(),
+        unique.len(),
+        "input {members:?} has {} distinct members but the token spells \
+         {spelled:?} ({} letters). A repeat must be ABSORBED, not concatenated.",
+        unique.len(),
+        spelled.len()
+    );
+
+    // ⚠️ And the prose must say so, because the vector alone leaves a reader
+    // inferring the rule from one example. This is the half a producer reads.
+    let note = text
+        .lines()
+        .find(|l| l.contains("\"field\": \"ops\"") && l.contains("\"input_shape\""))
+        .and_then(|l| between(l, "\"note\": \"", "\""))
+        .expect("the ops field_spec note");
+    assert!(
+        note.contains("ABSORBED"),
+        "the `ops` field_spec note does not say a repeated member is absorbed. \
+         The vector pins the behaviour; the note is what a producer reads before \
+         writing the code that would have to pass it."
+    );
+}

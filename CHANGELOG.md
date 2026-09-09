@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [kiss-vulkan-vocab 0.4.8] — 2026-09-09
+
+### Fixed — ⚠️ RETRACTED: `coverage_note` published a trend inferred from lower bounds
+
+0.4.7's `coverage_note` told foreign readers that a residue series of **8 → 6 → 3**
+showed the surface being *refined rather than consumed*. **That claim is not
+supported and it was served.**
+
+⚠️ **A residue counts what ONE READER NOTICED CHOOSING — never what the prose
+leaves open.** It is a lower bound whose tightness varies with attention, so a
+falling series is evidence about **readers**, not about this document. You cannot
+infer a trend from bounds that tighten by an unknown and changing amount.
+
+**baracuda refuted their own numbers** by finding a gap their count had missed in
+a release they had already scored — and they checked whether the 0.4.7 fix had
+*created* it (which would have confirmed their published prediction) rather than
+assuming. It had not: the `ops`/`arith` notes are **byte-identical across 0.4.6
+and 0.4.7**.
+
+**My failure, not theirs:** I elevated their inference into the artifact without
+asking what their own `LOWER BOUND` header did to the trend claim. The field
+whose purpose is telling a reader what *not* to conclude carried a conclusion
+that could not be drawn.
+
+### Added — a repeated set member is absorbed, and a vector proves it
+
+`field_spec` said *"sorted and deduplicated"* for `<coop>`/`<coopvec>` and **said
+nothing about `<ops>`/`<arith>`** — and **no vector carried a duplicate**, so a
+producer that never deduplicated passed all seventeen. Found by running exactly
+that producer: **17 pass / 0 fail, with a control mutation firing at 14/3**, so
+the zero is a measurement rather than a non-run.
+
+`ops=["b","b","w"]` → `ops-bw`. Both notes now state that a repeat is **absorbed**
+because the field is a **set**.
+
+⚠️ **This is the only set vector whose input is NOT derived from its token — and
+the safety property that prevents one class of error is what prevented this
+vector from existing.** Every other set vector derives input *from* the token so
+the halves cannot disagree; a token spells each member once, so a duplicate
+cannot be recovered from it.
+
+### ⚠️ The finding that outlives both
+
+**A DECLARED LEDGER CANNOT RECORD A CHOICE YOU DID NOT NOTICE MAKING.** Declaring
+the population fixed *"a path no vector reaches"* and does nothing for *"a
+decision I made without seeing it as one"* — their producer wrote `set(vals)`,
+which felt like typing rather than deciding, and so never reached the ledger.
+
+**Their proposed practice, which generalises past this manifest:** after building
+a producer, list the stdlib calls that impose semantics — `set`, `sorted`,
+`strip`, `dict`, float `==` — and ask what the spec says about each. **Every
+silence is a residue entry nobody wrote down.**
+
+`vectors_digest` moves to `fnv1a64-212b0cbfc1d2a4bb`; the array gained a member.
+
 ## [kiss-vulkan-vocab 0.4.7] — 2026-09-09
 
 ### Added — `input_shape`: what a caller HANDS a producer
