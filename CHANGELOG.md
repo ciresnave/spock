@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [kiss-vulkan-vocab 0.4.9] — unreleased
+
+### Changed — bumped immediately AFTER publishing 0.4.8, which is the point
+
+0.4.8 went to crates.io and the tree moved off that string in the same
+sitting. Nothing is wrong with 0.4.8 and nothing is being fixed here: the
+bump happens **because** the tree and the artifact still agree, so that the
+next edit to this crate cannot put changed content under a string the
+registry already serves.
+
+⚠️ **The old habit was to bump when preparing a release.** That leaves the
+whole interval between publishes as a period in which the declared version
+is a false claim about the tree — invisible, because the version field reads
+identically in both worlds. Bumping after publishing makes the tree's
+declared version *normally unpublished*, which is a state that cannot
+collide.
+
+The heading says `unreleased` rather than a date for the same reason.
+
+## [vulkan_gen 0.5.1] — unreleased
+
+### Fixed — `0.5.0` was one version string naming two artifacts
+
+`vulkan_gen` sat on `0.5.0`, which crates.io serves, while its `src/`
+differed from the served tarball by **36 hunks across 8 files** (−289/+284).
+A consumer resolving `0.5.0` got one artifact and this repository's own CI
+tested another, and both were green about different objects.
+
+⚠️ **The remedy is a BUMP, NOT A PUBLISH, and that was measured rather than
+assumed.** The two versions' *generated output* is byte-identical —
+2,982,463 bytes, 69,634 lines, 0 diff hunks — so there is nothing
+consumer-visible to ship. Publishing would have been the wrong fix: it
+would ship a release whose only content is a false claim being corrected.
+
+Found by the divergence probe added in #85, which is the first thing in this
+repository that could see the defect at all.
+
 ## [0.16.1] — unreleased
 
 ### Fixed — the install lines cited requirements that resolve to old releases
