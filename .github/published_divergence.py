@@ -46,7 +46,8 @@ import difflib
 import io
 import json
 import os
-import subprocess
+import shutil
+import subprocess  # nosec B404 - enumerating members means running cargo
 import sys
 import tarfile
 import tempfile
@@ -55,6 +56,24 @@ import urllib.request
 
 UA = {"User-Agent": "published-divergence-probe (+https://github.com/ciresnave/vulkane)"}
 REGISTRY = "https://crates.io/api/v1/crates"
+
+
+def cargo_path() -> str:
+    """The ABSOLUTE path of the cargo that will answer.
+
+    !! Not merely a lint fix. A bare `cargo` is resolved by PATH at call time,
+    so two runs that disagree cannot say whether they ran the same binary --
+    and this file already insists elsewhere that a toolchain identify itself
+    before its answer means anything. It was not applying that to the call it
+    depends on.
+    """
+    found = shutil.which("cargo")
+    if not found:
+        raise SystemExit(
+            "cargo is not on PATH, so the member list cannot be built. That is "
+            "a missing toolchain, not an empty workspace -- do not read it as "
+            "nothing to check.")
+    return found
 
 
 def publishes_to_crates_io(publish) -> bool:
@@ -81,8 +100,8 @@ def members(manifest_dir: str) -> list[tuple[str, str, str]]:
 
     From `cargo metadata`, never from Cargo.lock.
     """
-    out = subprocess.run(
-        ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+    out = subprocess.run(  # nosec B603 - absolute path, literal argv, no shell
+        [cargo_path(), "metadata", "--no-deps", "--format-version", "1"],
         cwd=manifest_dir, capture_output=True, text=True, encoding="utf-8",
     )
     if out.returncode != 0:
@@ -109,7 +128,9 @@ def registry_get(url: str, timeout: int):
     if not url.startswith(REGISTRY + "/"):
         raise SystemExit("refusing a URL outside the registry: %r" % url)
     req = urllib.request.Request(url, headers=UA)
-    return urllib.request.urlopen(req, timeout=timeout)  # noqa: S310
+    # nosec B310 - the registry prefix is asserted immediately above, so the
+    # scheme cannot be file:// or any other opener the value might name.
+    return urllib.request.urlopen(req, timeout=timeout)  # nosec B310
 
 
 def served(name: str) -> set[str] | None:
@@ -152,10 +173,13 @@ def fetch(name: str, version: str, into: str) -> str:
         reject_unsafe_members(t)
         # `filter="data"` is the 3.14 default and a hard error to omit there;
         # setting it explicitly keeps one behaviour across versions.
+        # nosec B202 - `reject_unsafe_members` above has already refused any
+        # escaping path or link member, on every Python version; `filter="data"`
+        # is a second layer where the interpreter provides it.
         try:
-            t.extractall(into, filter="data")
+            t.extractall(into, filter="data")  # nosec B202
         except TypeError:  # Python < 3.12 has no `filter=`
-            t.extractall(into)
+            t.extractall(into)  # nosec B202
     return os.path.join(into, "%s-%s" % (name, version))
 
 
@@ -498,13 +522,18 @@ def cargo_arm(check, tmp: str) -> None:
     # FileNotFoundError and the arm reds with a traceback, which reads as a
     # defect in this file rather than as a runner without a toolchain -- and
     # this job installs none, relying on the image providing one.
-    try:
-        ver = subprocess.run(["cargo", "--version"], capture_output=True,
-                             text=True, encoding="utf-8")
+    found = shutil.which("cargo")
+    if not found:
+        answer, rc = "NOTHING (cargo is not on PATH)", 1
+    else:
+        ver = subprocess.run(  # nosec B603 - absolute path, literal argv
+            [found, "--version"], capture_output=True, text=True,
+            encoding="utf-8")
         answer, rc = (ver.stdout or ver.stderr).strip(), ver.returncode
-    except OSError as e:
-        answer, rc = "NOTHING (%s)" % e.__class__.__name__, 1
+    # Print WHICH cargo, not only what it said: two runs that do not name the
+    # binary they used cannot be compared.
     print("  --   cargo answers: %s" % (answer or "NOTHING"))
+    print("  --   from: %s" % (found or "<not found>"))
     if rc != 0:
         print("       ^ this arm needs a toolchain on the runner; add one to")
         print("         the job rather than reading the failure as a code defect.")
