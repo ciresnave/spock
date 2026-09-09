@@ -179,6 +179,34 @@ fn manifest_carries_every_field_the_envelope_requires() {
 fn vocabulary_version_is_an_integer_and_a_float_would_be_rejected() {
     let m = committed();
 
+    // ⚠️ NAME THE SUBJECT BEFORE READING IT.
+    //
+    // The read below takes the text after the FIRST `vocabulary_version`,
+    // which is the top-level field only because the emitter happens to write
+    // it before `sufficiency`. Nothing asserted that, and §6.8-0017 REQUIRES
+    // a second `vocabulary_version` inside `sufficiency` the day `status`
+    // becomes `demonstrated` -- which is the point of that whole apparatus.
+    //
+    // So this is a latent subject-selection defect with a KNOWN trigger: the
+    // instrument would keep returning a real value, from a real field, and
+    // report on whichever one the file happened to order first.
+    //
+    // Prompted by baracuda retracting a finding measured against the wrong
+    // kernel: their selector took `variants[1]` and every downstream control
+    // honestly confirmed a real, different subject. A CONTROL VALIDATES THE
+    // INSTRUMENT, NEVER THE SUBJECT -- only naming what it points at reaches
+    // this class.
+    let occurrences = m.matches("\"vocabulary_version\":").count();
+    assert_eq!(
+        occurrences, 1,
+        "the manifest carries {occurrences} `vocabulary_version` keys, and the \
+         read below takes the FIRST. That was unambiguous while there was one. \
+         §6.8-0017 adds `sufficiency.vocabulary_version` when `status` becomes \
+         `demonstrated`, so disambiguate by scope here rather than relying on \
+         emission order -- the value returned stays well-formed either way, \
+         which is why nothing else would notice."
+    );
+
     let value = m
         .split("\"vocabulary_version\":")
         .nth(1)
