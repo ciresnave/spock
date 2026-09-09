@@ -226,18 +226,63 @@ ABSENT_FROM_TREE = -1
 ABSENT_FROM_ARTIFACT = -2
 
 
-def src_files(root: str) -> set[str]:
-    """Every file under `root/src`, as forward-slashed relative paths."""
+# Regenerated or rewritten by cargo during packaging, so they differ on every
+# crate ever published and would make the comparison fire on everything.
+GENERATED = frozenset({
+    "Cargo.toml",            # cargo-normalized from Cargo.toml.orig
+    "Cargo.toml.orig",       # a copy, by construction
+    "Cargo.lock",            # resolved at package time
+    ".cargo_vcs_info.json",  # stamped with the commit
+})
+
+
+def shipped_files(root: str) -> set[str]:
+    """Every AUTHORED file in an unpacked crate, forward-slashed and relative.
+
+    !! Was `src/` only, which on kiss-vulkan-vocab compared 1 of 14 packaged
+    files -- skipping `manifest/vulkan-vocabulary.json`, the normative artifact
+    that crate exists to publish, plus the emitter and every test.
+    """
     out = set()
-    for base, _, files in os.walk(os.path.join(root, "src")):
+    for base, _, files in os.walk(root):
         for f in files:
-            rel = os.path.relpath(os.path.join(base, f), root)
-            out.add(rel.replace(os.sep, "/"))
+            rel = os.path.relpath(os.path.join(base, f), root).replace(os.sep, "/")
+            if rel not in GENERATED:
+                out.add(rel)
     return out
 
 
-def compare(published_dir: str, tree_dir: str) -> tuple[list[tuple], int]:
-    """Authored source only, walked SYMMETRICALLY.
+def packaged_files(crate_dir: str) -> set[str]:
+    """What `cargo package` WOULD ship from the tree right now.
+
+    !! Not a directory walk. The published side lists what shipped, so the tree
+    side has to answer the same question or the two are not comparable -- a raw
+    walk flags every file cargo deliberately excludes, and `target/` alone would
+    bury the finding.
+    """
+    # !! No `-p <name>`: running in the crate's own directory selects it, so
+    # NOTHING VARIABLE REACHES argv. An earlier version validated the name
+    # against cargo's identifier rules instead, which is strictly weaker -- a
+    # checked argument is still an argument. Verified the two forms agree
+    # before switching (identical listings for kiss-vulkan-vocab and
+    # vulkane_derive).
+    # nosemgrep - same disposition as the other two call sites: argv[0] is the
+    # absolute path resolved for the literal "cargo", which is why it is not a
+    # static string, and every other element IS one.
+    out = subprocess.run(  # nosec B603 # nosemgrep
+        [cargo_path(), "package", "--quiet", "--list"],
+        cwd=crate_dir, capture_output=True, text=True, encoding="utf-8",
+    )
+    if out.returncode != 0:
+        sys.stderr.write(out.stderr)
+        raise SystemExit("cargo package --list failed in %s" % crate_dir)
+    return {ln.strip().replace(os.sep, "/") for ln in out.stdout.splitlines()
+            if ln.strip() and ln.strip() not in GENERATED}
+
+
+def compare(published_dir: str, tree_dir: str,
+            tree_listing: set[str] | None = None) -> tuple[list[tuple], int]:
+    """Authored files only, walked SYMMETRICALLY.
 
     !! The union of both sides, not the tarball's side. Walking only what was
     published means a file ADDED to the workspace is never examined and the
@@ -249,8 +294,8 @@ def compare(published_dir: str, tree_dir: str) -> tuple[list[tuple], int]:
     flag everything — the same always-fires failure as ignoring CRLF.
     """
     findings = []
-    published = src_files(published_dir)
-    tree = src_files(tree_dir)
+    published = shipped_files(published_dir)
+    tree = tree_listing if tree_listing is not None else shipped_files(tree_dir)
     for rel in sorted(published | tree):
         p = os.path.join(published_dir, *rel.split("/"))
         t = os.path.join(tree_dir, *rel.split("/"))
@@ -492,6 +537,30 @@ def walk_arms(check, tmp: str) -> None:
     check("a file the tree has and the tarball lacks is flagged",
           kinds == [ABSENT_FROM_ARTIFACT, ABSENT_FROM_TREE] and checked == 3)
 
+    # -- THE DEFECT THIS WALK WIDTH EXISTS FOR ------------------------------
+    # A `src/`-only walk compared 1 of 14 packaged files on kiss-vulkan-vocab,
+    # skipping manifest/vulkan-vocabulary.json -- the normative artifact that
+    # crate exists to publish. A divergence there reported `ok`, and the
+    # `files` column read `1` on every run with no denominator beside it.
+    os.makedirs(os.path.join(pub, "manifest"))
+    os.makedirs(os.path.join(tree, "manifest"))
+    io.open(os.path.join(pub, "manifest", "v.json"), "wb").write(b'{"a":1}\n')
+    io.open(os.path.join(tree, "manifest", "v.json"), "wb").write(b'{"a":2}\n')
+    found, checked = compare(pub, tree)
+    check("a difference OUTSIDE src/ is compared at all",
+          any(f[0] == "manifest/v.json" and f[1] > 0 for f in found))
+
+    # ...and the exclusion, or widening the walk would fire on every crate ever
+    # published: cargo rewrites these during packaging, so they differ always.
+    io.open(os.path.join(pub, "Cargo.toml"), "wb").write(b'[package]\n')
+    io.open(os.path.join(tree, "Cargo.toml"), "wb").write(b'[package]\nDIFFERENT\n')
+    io.open(os.path.join(pub, ".cargo_vcs_info.json"), "wb").write(b'{"sha1":"a"}\n')
+    io.open(os.path.join(tree, ".cargo_vcs_info.json"), "wb").write(b'{"sha1":"b"}\n')
+    found2, checked2 = compare(pub, tree)
+    check("cargo-rewritten files are never compared",
+          sorted(f[0] for f in found2) == sorted(f[0] for f in found)
+          and checked2 == checked)
+
 
 def tarball_arms(check, tmp: str) -> None:
     """The extraction guard, which runs on every Python version."""
@@ -608,7 +677,8 @@ def main() -> int:
                 rows.append((name, version, "UNPUBLISHED", 0, []))
             else:
                 d = fetch(name, version, tmp)
-                findings, checked = compare(d, tree_dir)
+                findings, checked = compare(
+                    d, tree_dir, packaged_files(tree_dir))
                 rows.append((name, version, "SERVED", checked, findings))
 
     return report(rows, args.gate)
