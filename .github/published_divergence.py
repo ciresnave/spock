@@ -46,7 +46,6 @@ import difflib
 import io
 import json
 import os
-import re
 import shutil
 import subprocess  # nosec B404 - enumerating members means running cargo
 import sys
@@ -253,7 +252,7 @@ def shipped_files(root: str) -> set[str]:
     return out
 
 
-def packaged_files(tree_dir: str, name: str) -> set[str]:
+def packaged_files(crate_dir: str) -> set[str]:
     """What `cargo package` WOULD ship from the tree right now.
 
     !! Not a directory walk. The published side lists what shipped, so the tree
@@ -261,23 +260,19 @@ def packaged_files(tree_dir: str, name: str) -> set[str]:
     walk flags every file cargo deliberately excludes, and `target/` alone would
     bury the finding.
     """
-    # !! The name reaches argv, so it is checked HERE rather than trusted from
-    # the caller. It arrives from `cargo metadata` and is therefore already
-    # repo-controlled -- but that is a property of the call site, not of this
-    # function, and the next caller may not have one.
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
-        raise SystemExit(
-            "refusing a crate name that is not a plain cargo identifier: %r" % name)
-    # nosemgrep - argv[0] is the absolute path resolved for the literal "cargo",
-    # every other element is a literal, and `name` is validated immediately
-    # above against cargo's own identifier rules.
-    out = subprocess.run(  # nosec B603 # nosemgrep
-        [cargo_path(), "package", "--quiet", "--list", "-p", name],
-        cwd=tree_dir, capture_output=True, text=True, encoding="utf-8",
+    # !! No `-p <name>`: running in the crate's own directory selects it, so
+    # NOTHING VARIABLE REACHES argv. An earlier version validated the name
+    # against cargo's identifier rules instead, which is strictly weaker -- a
+    # checked argument is still an argument. Verified the two forms agree
+    # before switching (identical listings for kiss-vulkan-vocab and
+    # vulkane_derive).
+    out = subprocess.run(  # nosec B603
+        [cargo_path(), "package", "--quiet", "--list"],
+        cwd=crate_dir, capture_output=True, text=True, encoding="utf-8",
     )
     if out.returncode != 0:
         sys.stderr.write(out.stderr)
-        raise SystemExit("cargo package --list failed for %s" % name)
+        raise SystemExit("cargo package --list failed in %s" % crate_dir)
     return {ln.strip().replace(os.sep, "/") for ln in out.stdout.splitlines()
             if ln.strip() and ln.strip() not in GENERATED}
 
@@ -460,21 +455,6 @@ def exit_code_arms(check) -> None:
 
 def publish_filter_arms(check) -> None:
     """Which `publish` spellings claim a crates.io string."""
-    # A name that reaches argv is refused unless it is a plain cargo
-    # identifier -- and the control, or the check could be refusing everything.
-    for name, want in (("kiss-vulkan-vocab", True), ("vulkan_gen", True),
-                       ("a; rm -rf /", False), ("../escape", False),
-                       ("", False), ("x" * 65, False)):
-        ok_name = True
-        try:
-            packaged_files("<never reached>", name)
-        except SystemExit as e:
-            ok_name = "plain cargo identifier" not in str(e)
-        except OSError:
-            ok_name = True  # got past validation, failed on the missing dir
-        check("crate name %-18r reaches argv: %s" % (name[:18], want),
-              ok_name == want)
-
     for publish, want, why in ((None, True, "the default: publish anywhere"),
                                ([], False, "`publish = false`"),
                                (["crates-io"], True, "explicitly allowed here"),
@@ -695,7 +675,7 @@ def main() -> int:
             else:
                 d = fetch(name, version, tmp)
                 findings, checked = compare(
-                    d, tree_dir, packaged_files(args.manifest_dir, name))
+                    d, tree_dir, packaged_files(tree_dir))
                 rows.append((name, version, "SERVED", checked, findings))
 
     return report(rows, args.gate)
