@@ -388,7 +388,23 @@ fn emit_declarative(o: &mut String) {
 // ---------------------------------------------------------------------------
 
 fn emit_field_spec(o: &mut String) {
-    let specs: [(&str, &str, &str); 5] = [
+    // ⚠️ `input_shape` names the KEYS a caller hands a producer. The prose
+    // above names CONCEPTS -- "M-N-K plus four component types" -- and the
+    // mapping from those to `m`,`n`,`k`,`a`,`b`,`c`,`result` existed nowhere:
+    // measured, ZERO of the input key names appeared delimited anywhere in
+    // the manifest. A producer reading different keys CRASHES rather than
+    // mismatching, so no vector could ever catch it -- the corpus pins what a
+    // token SPELLS and said nothing about what a caller must HAND a producer.
+    //
+    // ⚠️ ALL REQUIRED also dissolves a second gap rather than choosing a side
+    // in it: `tuple_sort_key` says dedup happens after sorting and never says
+    // what makes two tuples EQUAL. Spelled-dedup and structural-dedup diverge
+    // exactly when a key is absent-versus-explicitly-default. With no absent
+    // case the readings coincide, which is what this implementation does --
+    // `CoopShape::saturating` is a `bool`, not an `Option<bool>`.
+    //
+    // Both found by baracuda producing from the published 0.4.6 manifest.
+    let specs: [(&str, &str, &str, &str); 5] = [
         (
             "subgroup",
             "sg",
@@ -397,6 +413,7 @@ fn emit_field_spec(o: &mut String) {
              width-agnostic kernel that reads the width at runtime. One device \
              commonly admits several, and they are different binaries, so a \
              device yields a SET of valid tokens rather than one.",
+            "a scalar: the integer subgroup width, or the string \"dynamic\" for the width-agnostic case",
         ),
         (
             "ops",
@@ -405,6 +422,7 @@ fn emit_field_spec(o: &mut String) {
              letters in the canonical order given by `ops_alphabet`. \
              Juxtaposition is safe only because that alphabet is fixed-width \
              (§6.8-0006).",
+            "an array of the selected operation-class letters",
         ),
         (
             "arith",
@@ -416,6 +434,7 @@ fn emit_field_spec(o: &mut String) {
              capabilities and are not compute precision: a conformant device \
              may accept 16-bit data in a buffer and perform the arithmetic in \
              f32. Reading one as the other is a silently wrong lowering.",
+            "an array of the selected arithmetic capability names",
         ),
         (
             "coop",
@@ -427,6 +446,7 @@ fn emit_field_spec(o: &mut String) {
              guaranteed stable and the token must be byte-identical either way. \
              LENGTH-CONDITIONAL — see the `threshold` and `digest_input` \
              vectors.",
+            "an array of objects with keys `m`, `n`, `k`, `a`, `b`, `c`, `result`, `saturating` -- ALL REQUIRED, none omissible",
         ),
         (
             "coopvec",
@@ -438,17 +458,19 @@ fn emit_field_spec(o: &mut String) {
              and digested INDEPENDENTLY. The two fields switch on their own \
              bytes and never together, which is why both carry their own \
              threshold vectors.",
+            "an array of objects with keys `input`, `input_interpretation`, `matrix_interpretation`, `bias_interpretation`, `result`, `transpose` -- ALL REQUIRED, none omissible",
         ),
     ];
 
     writeln!(o, "  \"field_spec\": [").unwrap();
-    for (i, (field, prefix, note)) in specs.iter().enumerate() {
+    for (i, (field, prefix, note, input_shape)) in specs.iter().enumerate() {
         let comma = if i + 1 == specs.len() { "" } else { "," };
         writeln!(
             o,
-            "    {{ \"field\": \"{}\", \"prefix\": \"{}\", \"note\": \"{}\" }}{}",
+            "    {{ \"field\": \"{}\", \"prefix\": \"{}\", \"input_shape\": \"{}\", \"note\": \"{}\" }}{}",
             field,
             prefix,
+            esc(input_shape),
             esc(note),
             comma
         )
@@ -1345,7 +1367,18 @@ const COVERAGE_NOTE: &str = "What this manifest does and does not pin. The \
     `component_types` is NOT alphabetical -- `f64` precedes `bf16` -- and is \
     therefore discriminable, which is why it carries deliberate ordering \
     vectors and the other two cannot. The rule is the array's own order in all \
-    three cases; this corpus can only PROVE it for the third.";
+    three cases; this corpus can only PROVE it for the third. Finally, what \
+    four rounds of foreign reproduction have and have not established. A party \
+    producing from the published manifest alone reported eight items they had to \
+    guess, then six, then three -- while each round's FIX exposed a new question \
+    the previous prose had not had to answer: pinning two flags raised how they \
+    sort, pinning the sort raised where escapes sort, that raised whether the \
+    leading dimensions compare as text, and that raised what makes two tuples \
+    EQUAL. The residue is falling and the discovery rate is not, which says this \
+    surface is being REFINED rather than consumed: each statement made precise \
+    enough to check exposes the next thing it does not say. Treat a passing \
+    reproduction as evidence about the vectors, never as evidence that the prose \
+    is complete.";
 
 /// Every `ComponentType` this vocabulary version names, in canonical order.
 ///

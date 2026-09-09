@@ -1378,3 +1378,79 @@ fn the_alphabets_that_cannot_discriminate_their_own_order_still_coincide() {
          or the check is vacuous."
     );
 }
+
+/// Every vector's input must carry exactly the keys `input_shape` declares.
+///
+/// ⚠️ The key names existed nowhere before this: `field_spec` names CONCEPTS
+/// ("M-N-K plus four component types") and the input JSON uses `m`,`n`,`k`,
+/// `a`,`b`,`c`,`result`,`saturating`. Measured, ZERO of those names appeared
+/// delimited anywhere in the manifest. A producer reading different keys
+/// CRASHES rather than mismatching, so no vector could ever have caught it —
+/// the corpus pins what a token SPELLS and said nothing about what a caller
+/// must HAND a producer.
+///
+/// ⚠️ ALL REQUIRED also dissolves a second gap instead of picking a side in it.
+/// `tuple_sort_key` says dedup happens after sorting and never says what makes
+/// two tuples EQUAL; spelled-dedup and structural-dedup diverge exactly when a
+/// key is absent-versus-explicitly-default. With no absent case they coincide.
+///
+/// This reads the DECLARED key list out of `input_shape` rather than hardcoding
+/// it, because a gate that restates the rule cannot fail when the rule is wrong
+/// — the defect that let `empty_set_spelling` ship contradicting its own corpus.
+#[test]
+fn every_vector_input_carries_the_keys_input_shape_declares() {
+    let text = committed();
+
+    let declared = |field: &str| -> Vec<String> {
+        let at = text
+            .find(&format!("\"field\": \"{field}\""))
+            .unwrap_or_else(|| panic!("no field_spec entry for {field}"));
+        let shape = between(&text[at..], "\"input_shape\": \"", "\"")
+            .unwrap_or_else(|| panic!("{field} declares no `input_shape`"));
+        shape
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_string)
+            .collect()
+    };
+
+    for (field, prefix) in [("coop", "\"coop\": ["), ("coopvec", "\"coopvec\": [")] {
+        let keys = declared(field);
+        assert!(
+            keys.len() >= 5,
+            "`input_shape` for {field} names {keys:?}; expected the full key list. \
+             If it stopped naming them, a producer is back to guessing what a \
+             caller hands it — and no vector can catch that, because the wrong \
+             keys crash rather than mismatch."
+        );
+
+        // Every object in every vector's input for this field.
+        let mut checked = 0;
+        for (at, _) in text.match_indices(prefix) {
+            let rest = &text[at + prefix.len()..];
+            let arr = &rest[..rest.find(']').expect("array end")];
+            for obj in arr.split('{').skip(1) {
+                let body = &obj[..obj.find('}').unwrap_or(obj.len())];
+                for k in &keys {
+                    assert!(
+                        body.contains(&format!("\"{k}\"")),
+                        "a {field} input object omits `{k}`: {body:?}. \
+                         `input_shape` declares every key REQUIRED, and an \
+                         omitted one reopens the dedup-equality question — \
+                         spelled-dedup and structural-dedup differ exactly when \
+                         a key is absent versus explicitly default."
+                    );
+                }
+                checked += 1;
+            }
+        }
+        // Positive control: no objects found means the extractor broke, and
+        // every assertion above was satisfied by having nothing to check.
+        assert!(
+            checked >= 2,
+            "found only {checked} {field} input object(s); the extractor broke \
+             rather than the corpus shrinking"
+        );
+    }
+}
