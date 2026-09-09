@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] — unreleased
+
+### Fixed — the install lines cited requirements that resolve to old releases
+
+⚠️ **Seven sites told users to depend on `vulkane = "0.1"`, `"0.4"` or `"0.10"`
+while crates.io served `0.16.0`.** Four in `README.md`, and three inside the
+crate's own rustdoc — `src/lib.rs`, `src/safe/naga.rs`, `src/safe/shaderc.rs` —
+the last of which is the docs.rs landing page, the most-read copy of all.
+
+⚠️ **Every one of them RESOLVED, which is why nothing ever complained.**
+
+| cited | where | resolves to | published minors newer |
+| --- | --- | --- | --- |
+| `"0.1"` | `src/safe/naga.rs` | `0.1.0` | 13 |
+| `"0.4"` | `README.md` ×3, `src/safe/shaderc.rs` | `0.4.5` | 10 |
+| `"0.10"` | `README.md` ×1, `src/lib.rs` | `0.10.1` | 4 |
+
+A `cargo add` following the README **succeeds** and silently hands a stranger an
+old published release, with feature flags documented against 0.16. **A
+requirement that fails to resolve at least tells the user something. This one
+has no complainant** — the dangerous form is not the error, it is the plausible
+answer.
+
+⚠️ **An earlier draft of this entry said "a version twelve releases old", and
+was wrong twice.** It assigned ONE distance to THREE different requirements —
+caught in review — and the number itself was wrong for every one of them,
+because it came from subtracting minor numbers (16 − 4) when the published
+minors are `1..10, 13, 14, 15, 16`. **0.11 and 0.12 were never released, so a
+difference between version numbers is not a count of releases.** Recorded rather
+than edited away, since this entry is about citing versions accurately.
+
+**The rule, written down because nothing enforced it:** a version cited for
+CONSUMPTION must be one the registry currently serves; a version cited to
+DESCRIBE THIS TREE must be the tree's own. Today a single string does both jobs,
+and only because the two happen to coincide.
+
+**Two sites deliberately keep their old numbers.** `CHANGELOG.md` and
+`CONTRIBUTING.md` state what was true at a past release; rewriting those would
+falsify a record rather than fix a pointer. The distinction is the whole point —
+citing for consumption and citing to describe history are different acts.
+
+### Changed — bumped, because three of the corrections ship inside the crate
+
+`src/lib.rs`, `src/safe/naga.rs` and `src/safe/shaderc.rs` are packaged, so
+leaving the tree at `0.16.0` would put edited source under a version string
+crates.io already serves: **one version string naming two artifacts.** `0.16.1`
+is unpublished and remains so until a release.
+
+⚠️ **The heading says `unreleased` rather than a date on purpose.** The remedy
+for that class is to bump immediately AFTER publishing rather than before, so a
+tree's declared version is normally NOT yet on the registry — and a dated
+heading would claim a release that has not happened.
+
 ## [kiss-vulkan-vocab 0.4.8] — 2026-09-09
 
 ### Fixed — ⚠️ RETRACTED: `coverage_note` published a trend inferred from lower bounds
