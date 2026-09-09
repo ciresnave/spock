@@ -522,6 +522,59 @@ jobs:
           echo "CHANGELOG.md names all $found publishable versions, and"
           echo "[Unreleased] is present ($total released sections total)."
 
+      # The probe's own guards, offline. Its vacuous path -- "the scan
+      # matched nothing" -- cannot be reached by a healthy workspace, so
+      # nothing else will ever exercise it, and a guard that has only ever
+      # been green is indistinguishable from one that cannot fire.
+      #
+      # Thirteen mutations were run against that file before these arms were
+      # kept, each breaking exactly the arm that names it -- and the drill
+      # was re-run from scratch after review changed the code, because arms
+      # that were red against the old version prove nothing about the new.
+      #
+      # Two of them are controls rather than defects: the blindness guard
+      # made unconditional (an UNPUBLISHED crate compares zero files quite
+      # legitimately, so a guard that fires on any zero would red every
+      # correctly-bumped member), and the tarball guard made to refuse
+      # everything (a guard that rejects all input satisfies the arm that
+      # says it rejects the bad one).
+      - name: The divergence probe can still fail its own guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/published_divergence.py --self-test
+
+      # A crate can sit on a version string crates.io ALREADY SERVES while its
+      # source differs from what was served under it. Then a consumer resolving
+      # that string gets one artifact, this repository's own CI tests another,
+      # and both are green about different objects. Nothing in the repo says so:
+      # the version field is identical in both worlds, which is the whole defect.
+      #
+      # Measured 2026-09-08 at b5c88c9: `vulkan_gen 0.5.0` was exactly that --
+      # 36 hunks across 8 files against the served tarball.
+      #
+      # This is the PRODUCER arm and it is the only one that finds it. A
+      # lockfile audit tells you whether YOUR dependencies are pinned by
+      # checksum -- whether you could be HURT by this class. It says nothing
+      # about whether YOU are one of the two artifacts for somebody else. A repo
+      # whose lockfile is fully checksummed can still be the perpetrator.
+      #
+      # NOT ARMED YET, ON PURPOSE. It lands in report mode so its first CI run
+      # exhibits the defect it was built for instead of a green tick: a gate
+      # whose first appearance is green has never been observed to discriminate,
+      # and every later green is then uninterpretable. `--gate` goes on once
+      # `vulkan_gen` is bumped off the served string.
+      #
+      # Report mode is still not vacuous: the script exits 1 if the scan matched
+      # nothing, so "no publishable members" cannot be read as clean, and it
+      # exits 1 if `cargo metadata` fails rather than laundering that into an
+      # empty list.
+      - name: Report any crate sitting on a served version string (not yet armed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/published_divergence.py
+
   format:
     name: rustfmt
     runs-on: ubuntu-latest
