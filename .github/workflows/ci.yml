@@ -527,7 +527,7 @@ jobs:
       # nothing else will ever exercise it, and a guard that has only ever
       # been green is indistinguishable from one that cannot fire.
       #
-      # Eleven mutations were run against that file before these arms were
+      # Thirteen mutations were run against that file before these arms were
       # kept, each breaking exactly the arm that names it -- and the drill
       # was re-run from scratch after review changed the code, because arms
       # that were red against the old version prove nothing about the new.
