@@ -77,5 +77,24 @@ winit = "0.30"
 raw-window-handle = "0.6"
 
 [package.metadata.docs.rs]
-all-features = true
+# ⚠️ NOT `all-features = true`. It was, and docs.rs has not successfully built
+# a single version of this crate since 0.4.4 because of it. `--all-features`
+# turns on `shaderc`, whose `shaderc-sys` build script finds no system library
+# in the docs.rs sandbox and falls back to building glslang from source with
+# CMake -- which is not there either.
+#
+# Measured, from the docs.rs build log for 0.16.0 (build 4345929):
+#
+#   error: failed to run custom build command for `shaderc-sys v0.8.3`
+#   cargo:warning=shaderc: cannot find native shaderc library on system;
+#                 falling back to build from source
+#
+# `fetch-spec` is omitted too: docs.rs builds `--offline`, and the feature adds
+# no API surface -- it only changes where `build.rs` looks for vk.xml.
+#
+# ⚠️ The cost, stated rather than hidden: `vulkane::safe::shaderc` will not
+# appear on docs.rs. That is strictly better than the status quo, in which
+# NOTHING appears -- the rustdoc URL redirects to the crate page and a visitor
+# sees only the README.
+features = ["build-support", "kiss-target", "naga", "derive"]
 rustdoc-args = ["--cfg", "docsrs"]
