@@ -559,21 +559,37 @@ jobs:
       # about whether YOU are one of the two artifacts for somebody else. A repo
       # whose lockfile is fully checksummed can still be the perpetrator.
       #
-      # NOT ARMED YET, ON PURPOSE. It lands in report mode so its first CI run
-      # exhibits the defect it was built for instead of a green tick: a gate
-      # whose first appearance is green has never been observed to discriminate,
-      # and every later green is then uninterpretable. `--gate` goes on once
-      # `vulkan_gen` is bumped off the served string.
+      # ARMED. It landed in REPORT MODE first, deliberately, so that its first
+      # CI run would exhibit the defect it was built for rather than a green
+      # tick -- a gate whose first appearance is green has never been observed
+      # to discriminate, and every later green is then uninterpretable.
       #
-      # Report mode is still not vacuous: the script exits 1 if the scan matched
-      # nothing, so "no publishable members" cannot be read as clean, and it
-      # exits 1 if `cargo metadata` fails rather than laundering that into an
-      # empty list.
-      - name: Report any crate sitting on a served version string (not yet armed)
+      # That period produced its evidence. Read from the runner log of the
+      # first run rather than reproduced locally:
+      #
+      #   vulkan_gen  0.5.0  SERVED  27  DIVERGED
+      #   1 crate(s) sit on a SERVED version string with different content
+      #
+      # ...and the job passed, because report mode exits 0. The finding was
+      # visible before anyone had formed an opinion about the gate.
+      #
+      # Arming now that every member is off a served string. Verified BEFORE
+      # arming, on the post-merge tree rather than on the branch -- a run
+      # against the tree the change has not landed in is not evidence about it:
+      #
+      #   report exit=0   gate exit=0
+      #   kiss-vulkan-vocab 0.4.9 UNPUBLISHED · vulkan_gen 0.5.1 UNPUBLISHED
+      #   vulkane 0.16.1 UNPUBLISHED · vulkane_derive 0.1.1 SERVED, 3 files, ok
+      #
+      # ⚠️ It was never vacuous even unarmed: the script exits 1 if the scan
+      # matched nothing, so "no publishable members" cannot read as clean, and
+      # 1 if `cargo metadata` fails rather than laundering that into an empty
+      # list. Arming adds the third exit: 1 on an actual collision.
+      - name: No crate sits on a served version string with different content
         shell: bash
         run: |
           set -euo pipefail
-          python3 .github/published_divergence.py
+          python3 .github/published_divergence.py --gate
 
   format:
     name: rustfmt
