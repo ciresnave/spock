@@ -421,7 +421,9 @@ fn emit_field_spec(o: &mut String) {
             "Subgroup operation classes, spelled as JUXTAPOSED single ASCII \
              letters in the canonical order given by `ops_alphabet`. \
              Juxtaposition is safe only because that alphabet is fixed-width \
-             (§6.8-0006).",
+             (§6.8-0006). A repeated member is ABSORBED: this field is a SET, \
+             so the inputs `[\"b\", \"b\", \"w\"]` and `[\"b\", \"w\"]` spell ONE \
+             token, `ops-bw`.",
             "an array of the selected operation-class letters",
         ),
         (
@@ -433,7 +435,9 @@ fn emit_field_spec(o: &mut String) {
              decodable as the set grows. Note `st8`/`st16` are STORAGE \
              capabilities and are not compute precision: a conformant device \
              may accept 16-bit data in a buffer and perform the arithmetic in \
-             f32. Reading one as the other is a silently wrong lowering.",
+             f32. Reading one as the other is a silently wrong lowering. A \
+             repeated member is ABSORBED here too: `<arith>` is a SET and its \
+             input is deduplicated before spelling.",
             "an array of the selected arithmetic capability names",
         ),
         (
@@ -852,6 +856,57 @@ fn set_field_vectors() -> Vec<String> {
         Arith::NONE,
     ));
 
+    // ⚠️ That a REPEATED member is absorbed. `field_spec` said "sorted and
+    // deduplicated" for `<coop>` and `<coopvec>` and said NOTHING about these
+    // two, and NO vector carried a duplicate -- so a producer that never
+    // deduplicated passed every one of them.
+    //
+    // ⚠️ Found by baracuda running a producer that does not deduplicate: 17 of
+    // 17 pass, with a control mutation firing at 14/3 so the zero is a
+    // measurement rather than a non-run. The gap PREDATED the release they
+    // found it in -- they checked, rather than reporting it as created by the
+    // previous fix, which would have confirmed their own published prediction.
+    //
+    // Their own producer wrote `set(vals)` and never recorded the choice: a
+    // DECLARED ledger cannot record a decision you did not notice making.
+    v.push(dedup_set_vector(
+        "ops",
+        "An input REPEATING a member. `<ops>` is a SET, so `b` twice is \
+         absorbed and the token spells it once -- a producer that concatenated \
+         its input would emit `ops-bbw`, which under §6.8-0002 is a different \
+         cell rather than a differently-written same one. NEITHER set-dedup vector derives \
+         its input from its token, because a token spells each member once \
+         and a duplicate cannot be recovered from it.",
+        OpClasses::BASIC | OpClasses::ROTATE,
+        Arith::NONE,
+        &["b", "b", "w"],
+    ));
+
+    // ⚠️ The SAME rule, on a field with a DIFFERENT SPELLING. One vector
+    // could not stand for both: `<ops>` juxtaposes single letters, so a
+    // concatenating producer emits a DOUBLED LETTER (`ops-bbw`), while
+    // `<arith>` joins named parts with `-` and emits a REPEATED PART
+    // (`arith-f16-f16-i8`). The defect is one rule and two surfaces, and a
+    // reader who generalized from the `<ops>` vector would be generalizing
+    // from the spelling rather than from the rule.
+    //
+    // Found by review on #84, not by a gate: the `<arith>` field_spec note
+    // said ABSORBED while only `<ops>` carried a vector. The test now reads
+    // WHICH fields claim absorption and requires a vector for each, so a
+    // third such claim cannot arrive uncovered.
+    v.push(dedup_set_vector(
+        "arith",
+        "An input REPEATING a member, in the field whose members are NAMED \
+         rather than single letters. `<arith>` is a SET, so `f16` twice is \
+         absorbed and the token spells it once -- a producer that \
+         concatenated its input would emit `arith-f16-f16-i8`, which under \
+         §6.8-0002 is a different cell rather than a differently-written \
+         same one.",
+        OpClasses::NONE,
+        Arith::FLOAT16 | Arith::INT8,
+        &["f16", "f16", "i8"],
+    ));
+
     v
 }
 
@@ -1164,6 +1219,56 @@ fn coop_vector(pins: &str, note: &str, shapes: &[CoopShape]) -> String {
 /// and a bare `"none"` at the comparison site reads like a member.
 const EMPTY_SET_MEMBER: &str = "none";
 
+/// A set field whose INPUT repeats a member, pinning that the repeat is
+/// absorbed.
+///
+/// ⚠️ The one set vector whose input is NOT derived from its token, and that
+/// is precisely the point. Every other one derives input FROM the token so the
+/// two halves cannot disagree -- deliberately -- and that safety property is
+/// exactly what makes a duplicate unrepresentable, since a token spells each
+/// member once. The property that prevents one class of error prevented this
+/// vector from existing.
+fn dedup_set_vector(
+    field: &str,
+    note: &str,
+    ops: OpClasses,
+    arith: Arith,
+    input: &[&str],
+) -> String {
+    let token = VulkanTarget {
+        subgroup: Subgroup::Fixed(32),
+        ops,
+        arith,
+        coop: CoopMatrix::None,
+        coopvec: CoopVector::None,
+    }
+    .to_token();
+    let unique: std::collections::BTreeSet<&&str> = input.iter().collect();
+    assert!(
+        unique.len() < input.len(),
+        "a dedup vector's input must REPEAT a member or it pins nothing about \
+         absorption -- got {input:?}"
+    );
+    let members = input
+        .iter()
+        .map(|m| format!("\"{m}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let (ops_in, arith_in) = if field == "ops" {
+        (members, String::new())
+    } else {
+        (String::new(), members)
+    };
+    format!(
+        "{{ \"pins\": \"set-dedup\", \"field\": \"{}\", \"note\": \"{}\", \"input\": {{ \"subgroup\": 32, \"ops\": [{}], \"arith\": [{}], \"coop\": [], \"coopvec\": [] }}, \"token\": \"{}\" }}",
+        field,
+        esc(note),
+        ops_in,
+        arith_in,
+        token
+    )
+}
+
 fn set_field_vector(field: &str, note: &str, ops: OpClasses, arith: Arith) -> String {
     let token = VulkanTarget {
         subgroup: Subgroup::Fixed(32),
@@ -1368,17 +1473,14 @@ const COVERAGE_NOTE: &str = "What this manifest does and does not pin. The \
     therefore discriminable, which is why it carries deliberate ordering \
     vectors and the other two cannot. The rule is the array's own order in all \
     three cases; this corpus can only PROVE it for the third. Finally, what \
-    four rounds of foreign reproduction have and have not established. A party \
-    producing from the published manifest alone reported eight items they had to \
-    guess, then six, then three -- while each round's FIX exposed a new question \
-    the previous prose had not had to answer: pinning two flags raised how they \
-    sort, pinning the sort raised where escapes sort, that raised whether the \
-    leading dimensions compare as text, and that raised what makes two tuples \
-    EQUAL. The residue is falling and the discovery rate is not, which says this \
-    surface is being REFINED rather than consumed: each statement made precise \
-    enough to check exposes the next thing it does not say. Treat a passing \
-    reproduction as evidence about the vectors, never as evidence that the prose \
-    is complete.";
+    a reproduction's residue is and is not. A residue counts what ONE READER \
+    NOTICED CHOOSING -- never what this prose leaves open. It is a lower bound \
+    of unknown tightness, so a falling series across releases is evidence about \
+    READERS rather than about this document. An earlier version of this note \
+    reported such a series as a trend; the party who produced the numbers \
+    refuted it by finding a gap their own count had missed, in a release they \
+    had already scored. Treat a passing reproduction as evidence about the \
+    VECTORS, and never as evidence that this prose is complete.";
 
 /// Every `ComponentType` this vocabulary version names, in canonical order.
 ///
