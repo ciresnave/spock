@@ -157,6 +157,26 @@ POLICIES = [
     ("CHANGELOG.md", RUN,
      "reads two local files and runs no build; the version-vs-changelog" +
      " disagreement it catches is exactly as real locally as on a runner"),
+    ("published_divergence.py --self-test", RUN,
+     "offline by construction -- fabricated rows and temp directories, no"
+     + " registry and no network -- so it runs here exactly as it does on"
+     + " a runner. MUST precede the row below: both commands name the same"
+     + " script and the first match wins"),
+    # ⚠️ Not skipped for the usual reason. Every other SKIP above is
+    # "this box lacks the thing" -- a device, a Linux runner, libshaderc --
+    # and would run fine somewhere else. This one has no offline form at
+    # all: the REGISTRY is its subject, so there is nothing to compare
+    # against without reaching it. Classifying it RUN would make every
+    # local harness invocation download published tarballs, and a network
+    # outage would then be reported as a failing gate -- the exact
+    # non-event-as-plausible-result this harness exists to prevent.
+    #
+    # Run it by hand before publishing:
+    #     python3 .github/published_divergence.py
+    ("published_divergence.py", SKIP,
+     "queries crates.io and downloads the published tarball of every"
+     + " member sitting on a served version; there is no offline form of"
+     + " the question, so a local run would depend on the network"),
     ("cargo package --list", RUN,
      "lists what WOULD be published without building or touching a device; the" +
      " bundled-vk.xml assertion it guards is worth running locally too"),
