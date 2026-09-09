@@ -57,11 +57,29 @@ UA = {"User-Agent": "published-divergence-probe (+https://github.com/ciresnave/v
 REGISTRY = "https://crates.io/api/v1/crates"
 
 
-def members(manifest_dir: str) -> list[tuple[str, str, str]]:
-    """Every PUBLISHABLE workspace member: (name, version, directory).
+def publishes_to_crates_io(publish) -> bool:
+    """Does this member make a claim on a CRATES.IO version string?
 
-    From `cargo metadata`, never from Cargo.lock. `publish = false` members are
-    excluded because they make no claim on a registry string.
+    `cargo metadata` spells the field three ways and only one of them is the
+    absence of a restriction:
+
+        None                  publish anywhere -- the default          YES
+        []                    `publish = false`                        no
+        ["crates-io"]         explicitly allowed here                  YES
+        ["some-private-reg"]  allowed SOMEWHERE ELSE                   no
+
+    !! The last row is why `publish != []` is not the test. A member restricted
+    to a private registry publishes nothing to crates.io, so comparing it
+    against a crates.io artifact compares it against a STRANGER'S crate that
+    merely shares its name -- a confident DIVERGED about two unrelated things.
+    """
+    return publish is None or "crates-io" in publish
+
+
+def members(manifest_dir: str) -> list[tuple[str, str, str]]:
+    """Every member that claims a crates.io version string: (name, version, dir).
+
+    From `cargo metadata`, never from Cargo.lock.
     """
     out = subprocess.run(
         ["cargo", "metadata", "--no-deps", "--format-version", "1"],
@@ -76,7 +94,7 @@ def members(manifest_dir: str) -> list[tuple[str, str, str]]:
     return [
         (p["name"], p["version"], os.path.dirname(p["manifest_path"]))
         for p in sorted(meta["packages"], key=lambda p: p["name"])
-        if p.get("publish") != []
+        if publishes_to_crates_io(p.get("publish"))
     ]
 
 
@@ -92,6 +110,25 @@ def served(name: str) -> set[str] | None:
         raise
 
 
+def reject_unsafe_members(t: tarfile.TarFile) -> None:
+    """Refuse any member that could write outside the extraction directory.
+
+    !! Runs on EVERY Python version, not only where `filter=` is missing. A
+    guard placed only in the fallback branch is present on the machine you
+    tested it on and absent on the older runner that takes the other branch --
+    which is the one configuration nobody looks at.
+    """
+    for m in t.getmembers():
+        name = m.name.replace(chr(92), "/")
+        if name.startswith("/") or os.path.isabs(name) or ".." in name.split("/"):
+            raise SystemExit(
+                "refusing a tarball member whose path escapes the extraction "
+                "directory: %r" % m.name)
+        if m.issym() or m.islnk():
+            raise SystemExit(
+                "refusing a link member in a registry tarball: %r" % m.name)
+
+
 def fetch(name: str, version: str, into: str) -> str:
     url = "%s/%s/%s/download" % (REGISTRY, name, version)
     req = urllib.request.Request(url, headers=UA)
@@ -100,23 +137,32 @@ def fetch(name: str, version: str, into: str) -> str:
     path = os.path.join(into, "%s-%s.crate" % (name, version))
     io.open(path, "wb").write(blob)
     with tarfile.open(path, "r:gz") as t:
+        reject_unsafe_members(t)
         # `filter="data"` is the 3.14 default and a hard error to omit there;
         # setting it explicitly keeps one behaviour across versions.
         try:
             t.extractall(into, filter="data")
-        except TypeError:  # Python < 3.12 has no `filter`
+        except TypeError:  # Python < 3.12 has no `filter=`
             t.extractall(into)
     return os.path.join(into, "%s-%s" % (name, version))
 
 
-def lines(path: str) -> list[str]:
-    """CRLF-normalized. Without this every file differs on a Windows checkout,
-    and a comparison that always fires is a comparison nobody reads."""
-    raw = io.open(path, "rb").read().replace(b"\r\n", b"\n")
-    return raw.decode("utf-8", errors="replace").split("\n")
+def lines(path: str) -> list[bytes]:
+    """CRLF-normalized, and BYTES all the way down.
+
+    Without the normalization every file differs on a Windows checkout, and a
+    comparison that always fires is a comparison nobody reads.
+
+    !! Without the bytes it under-reports instead. Decoding with
+    `errors="replace"` maps every invalid sequence onto U+FFFD, so two files
+    that differ in their actual bytes compare EQUAL -- a divergence probe
+    silently blind to exactly the corruption it should be loudest about. There
+    is no reason to decode: nothing here reads the text, only compares it.
+    """
+    return io.open(path, "rb").read().replace(b"\r\n", b"\n").split(b"\n")
 
 
-def edit_size(a: list[str], b: list[str]) -> tuple[int, int, int]:
+def edit_size(a: list[bytes], b: list[bytes]) -> tuple[int, int, int]:
     """(hunks, removed, added) from a real diff algorithm.
 
     ⚠️ NEVER a line-by-line inequality count. A positional walk marks every line
@@ -131,30 +177,47 @@ def edit_size(a: list[str], b: list[str]) -> tuple[int, int, int]:
             sum(o[4] - o[3] for o in ops))
 
 
+ABSENT_FROM_TREE = -1
+ABSENT_FROM_ARTIFACT = -2
+
+
+def src_files(root: str) -> set[str]:
+    """Every file under `root/src`, as forward-slashed relative paths."""
+    out = set()
+    for base, _, files in os.walk(os.path.join(root, "src")):
+        for f in files:
+            rel = os.path.relpath(os.path.join(base, f), root)
+            out.add(rel.replace(os.sep, "/"))
+    return out
+
+
 def compare(published_dir: str, tree_dir: str) -> tuple[list[tuple], int]:
-    """Authored source only.
+    """Authored source only, walked SYMMETRICALLY.
+
+    !! The union of both sides, not the tarball's side. Walking only what was
+    published means a file ADDED to the workspace is never examined and the
+    crate reports `ok` while differing -- the probe would be blind to the
+    commonest way a tree moves ahead of a release.
 
     The tarball's Cargo.toml is cargo-normalized and its .cargo_vcs_info.json is
     generated, so both differ on every crate ever published. Including them would
     flag everything — the same always-fires failure as ignoring CRLF.
     """
-    findings, checked = [], 0
-    src = os.path.join(published_dir, "src")
-    if not os.path.isdir(src):
-        return findings, 0
-    for base, _, files in os.walk(src):
-        for f in files:
-            pub = os.path.join(base, f)
-            rel = os.path.relpath(pub, published_dir)
-            tree = os.path.join(tree_dir, rel)
-            checked += 1
-            if not os.path.exists(tree):
-                findings.append((rel, -1, 0, 0))
-                continue
-            a, b = lines(pub), lines(tree)
+    findings = []
+    published = src_files(published_dir)
+    tree = src_files(tree_dir)
+    for rel in sorted(published | tree):
+        p = os.path.join(published_dir, *rel.split("/"))
+        t = os.path.join(tree_dir, *rel.split("/"))
+        if rel not in tree:
+            findings.append((rel, ABSENT_FROM_TREE, 0, 0))
+        elif rel not in published:
+            findings.append((rel, ABSENT_FROM_ARTIFACT, 0, 0))
+        else:
+            a, b = lines(p), lines(t)
             if a != b:
                 findings.append((rel,) + edit_size(a, b))
-    return findings, checked
+    return findings, len(published | tree)
 
 
 def report(rows: list[tuple], gate: bool) -> int:
@@ -168,20 +231,30 @@ def report(rows: list[tuple], gate: bool) -> int:
     """
     print("  %-22s %-10s %-16s %6s  %s"
           % ("crate", "version", "string", "files", "verdict"))
-    diverged = []
+    diverged, unscanned = [], []
     for name, version, state, checked, findings in rows:
-        verdict = "DIVERGED" if findings else "ok"
-        if findings:
+        # !! A crate on a SERVED string compared over ZERO files is not clean,
+        # it is UNSCANNED. This is the same rule as the empty member list
+        # below, one level down -- and I had guarded the empty MEMBER LIST
+        # while leaving the empty FILE SET reading as agreement. Found by
+        # review on #85, which is the second time this file's own anti-vacuous
+        # rule was applied at one level and not the other.
+        blind = state == "SERVED" and checked == 0
+        verdict = "UNSCANNED" if blind else ("DIVERGED" if findings else "ok")
+        if blind:
+            unscanned.append(name)
+        elif findings:
             diverged.append(name)
         print("  %-22s %-10s %-16s %6d  %s"
               % (name, version, state, checked, verdict))
         for rel, hunks, rem, add in findings:
-            if hunks < 0:
-                print("  %52s %s  (absent from the tree)"
-                      % ("", rel.replace(os.sep, "/")))
+            if hunks == ABSENT_FROM_TREE:
+                print("  %52s %s  (absent from the tree)" % ("", rel))
+            elif hunks == ABSENT_FROM_ARTIFACT:
+                print("  %52s %s  (absent from the published artifact)"
+                      % ("", rel))
             else:
-                print("  %52s %s  %d hunks, -%d/+%d"
-                      % ("", rel.replace(os.sep, "/"), hunks, rem, add))
+                print("  %52s %s  %d hunks, -%d/+%d" % ("", rel, hunks, rem, add))
 
     # A scan that matched nothing must FAIL, not pass. An empty member list and
     # a clean workspace produce identical silence otherwise, and the empty one
@@ -201,6 +274,15 @@ def report(rows: list[tuple], gate: bool) -> int:
         print("     all-ok result cannot be distinguished from a broken comparator.")
         print("     Bump one member post-publish to get a known-green row.")
 
+    if unscanned:
+        print()
+        print("  %d crate(s) sit on a SERVED version and were compared over ZERO"
+              % len(unscanned))
+        print("  files: %s" % ", ".join(unscanned))
+        print("  Nothing was examined, so this is not a clean result. Either the")
+        print("  published tarball carries no `src/`, or the member keeps its")
+        print("  sources somewhere this probe does not look.")
+
     if diverged:
         print()
         print("  %d crate(s) sit on a SERVED version string with different content: %s"
@@ -209,8 +291,8 @@ def report(rows: list[tuple], gate: bool) -> int:
         print("  the difference is one consumers should receive -- measure that, do not")
         print("  assume it: identical sources are not required for identical behaviour,")
         print("  and differing sources do not imply differing output.")
-        if gate:
-            return 1
+    if (diverged or unscanned) and gate:
+        return 1
     return 0
 
 
@@ -243,6 +325,7 @@ def self_test() -> int:
 
     CLEAN = [("a", "1.0.0", "SERVED", 12, []),
              ("b", "2.0.0", "UNPUBLISHED", 0, [])]
+    BLIND = [("a", "1.0.0", "SERVED", 0, [])]
     DIRTY = CLEAN + [("c", "3.0.0", "SERVED", 4, [("src/lib.rs", 2, 5, 5)])]
 
     # -- the anti-vacuous guard, in BOTH modes ------------------------------
@@ -262,6 +345,25 @@ def self_test() -> int:
           code(DIRTY, False) == 0)
     check("the same divergence blocks when armed", code(DIRTY, True) == 1)
 
+    # -- the per-crate blindness, which is the row-level guard one level down -
+    check("a SERVED crate compared over zero files does not read clean",
+          code(BLIND, True) == 1)
+    check("...and it reports without blocking when unarmed",
+          code(BLIND, False) == 0)
+    # An UNPUBLISHED crate legitimately compares zero files -- it has no
+    # artifact to compare against -- so the guard must NOT fire there, or every
+    # correctly-bumped member would red.
+    check("an UNPUBLISHED crate at zero files is still clean",
+          code([("b", "2.0.0", "UNPUBLISHED", 0, [])], True) == 0)
+
+    # -- which members claim a crates.io string ----------------------------
+    for publish, want, why in ((None, True, "the default: publish anywhere"),
+                               ([], False, "`publish = false`"),
+                               (["crates-io"], True, "explicitly allowed here"),
+                               (["a-private-reg"], False, "allowed ELSEWHERE")):
+        check("publish=%-17r -> %-5s (%s)" % (publish, want, why),
+              publishes_to_crates_io(publish) == want)
+
     with tempfile.TemporaryDirectory() as tmp:
         crlf = os.path.join(tmp, "crlf.rs")
         lf = os.path.join(tmp, "lf.rs")
@@ -269,6 +371,16 @@ def self_test() -> int:
         io.open(crlf, "wb").write(b"fn a() {}\r\nfn b() {}\r\n")
         io.open(lf, "wb").write(b"fn a() {}\nfn b() {}\n")
         io.open(other, "wb").write(b"fn a() {}\nfn c() {}\n")
+
+        # !! The fixture must be verified before the arm that uses it means
+        # anything. A CRLF control whose "CRLF" file carries no CR passes for
+        # the wrong reason -- the normalizer is never exercised and the arm
+        # reports success. Read as bytes: this box has at least one CR
+        # detector that answers identically on pure-LF and pure-CRLF input.
+        raw_crlf = io.open(crlf, "rb").read()
+        raw_lf = io.open(lf, "rb").read()
+        check("the CRLF fixture actually carries CR and the LF one does not",
+              raw_crlf.count(b"\r\n") == 2 and raw_lf.count(b"\r") == 0)
 
         # A comparison that fires on every file is a comparison nobody reads,
         # and on a Windows checkout line endings alone produce exactly that.
@@ -299,7 +411,52 @@ def self_test() -> int:
         io.open(os.path.join(pub, "src", "gone.rs"), "wb").write(b"x\n")
         found, checked = compare(pub, tree)
         check("a file the tarball has and the tree lacks is flagged",
-              len(found) == 1 and found[0][1] == -1 and checked == 2)
+              len(found) == 1 and found[0][1] == ABSENT_FROM_TREE and checked == 2)
+
+        # ...and the other direction, which the tarball-only walk could not see:
+        # a file ADDED to the workspace is the commonest way a tree moves ahead
+        # of its release, and it was reported as `ok`.
+        io.open(os.path.join(tree, "src", "added.rs"), "wb").write(b"y\n")
+        found, checked = compare(pub, tree)
+        kinds = sorted(f[1] for f in found)
+        check("a file the tree has and the tarball lacks is flagged",
+              kinds == [ABSENT_FROM_ARTIFACT, ABSENT_FROM_TREE] and checked == 3)
+
+        # -- bytes, not replacement characters ---------------------------
+        # Two DIFFERENT invalid UTF-8 sequences decode to the same U+FFFD, so a
+        # decoding comparator calls these files equal.
+        bad_a, bad_b = os.path.join(tmp, "ba.rs"), os.path.join(tmp, "bb.rs")
+        io.open(bad_a, "wb").write(b"x = \xff\n")
+        io.open(bad_b, "wb").write(b"x = \xfe\n")
+        check("distinct invalid UTF-8 bytes are not collapsed together",
+              lines(bad_a) != lines(bad_b))
+
+        # -- the tarball guard, on every Python version ------------------
+        payload = os.path.join(tmp, "payload")
+        io.open(payload, "wb").write(b"x")
+        evil = os.path.join(tmp, "evil.tar.gz")
+        with tarfile.open(evil, "w:gz") as w:
+            info = w.gettarinfo(payload, arcname="../escaped.txt")
+            with io.open(payload, "rb") as fh:
+                w.addfile(info, fh)
+        safe = os.path.join(tmp, "safe.tar.gz")
+        with tarfile.open(safe, "w:gz") as w:
+            info = w.gettarinfo(payload, arcname="crate-1.0.0/src/lib.rs")
+            with io.open(payload, "rb") as fh:
+                w.addfile(info, fh)
+
+        def refused(archive):
+            try:
+                with tarfile.open(archive, "r:gz") as r:
+                    reject_unsafe_members(r)
+                return False
+            except SystemExit:
+                return True
+
+        check("a tarball member escaping the directory is refused",
+              refused(evil))
+        # ...and the control, or the guard could be refusing everything.
+        check("an ordinary tarball member is not refused", not refused(safe))
 
         # -- the one arm that needs a toolchain ----------------------------
         # `cargo metadata --no-deps` does not resolve dependencies, so this

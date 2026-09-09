@@ -527,12 +527,17 @@ jobs:
       # nothing else will ever exercise it, and a guard that has only ever
       # been green is indistinguishable from one that cannot fire.
       #
-      # Nine mutations were run against that file before these arms were
-      # kept, each breaking exactly the arm that names it: the guard
-      # removed, the guard made unconditional, report mode made to block,
-      # gate mode made not to, CRLF normalization dropped, the reader made
-      # to return a constant, the diff made a positional walk, the file
-      # walk short-circuited, and the publish filter dropped.
+      # Eleven mutations were run against that file before these arms were
+      # kept, each breaking exactly the arm that names it -- and the drill
+      # was re-run from scratch after review changed the code, because arms
+      # that were red against the old version prove nothing about the new.
+      #
+      # Two of them are controls rather than defects: the blindness guard
+      # made unconditional (an UNPUBLISHED crate compares zero files quite
+      # legitimately, so a guard that fires on any zero would red every
+      # correctly-bumped member), and the tarball guard made to refuse
+      # everything (a guard that rejects all input satisfies the arm that
+      # says it rejects the bad one).
       - name: The divergence probe can still fail its own guards
         shell: bash
         run: |
