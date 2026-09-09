@@ -266,7 +266,10 @@ def packaged_files(crate_dir: str) -> set[str]:
     # checked argument is still an argument. Verified the two forms agree
     # before switching (identical listings for kiss-vulkan-vocab and
     # vulkane_derive).
-    out = subprocess.run(  # nosec B603
+    # nosemgrep - same disposition as the other two call sites: argv[0] is the
+    # absolute path resolved for the literal "cargo", which is why it is not a
+    # static string, and every other element IS one.
+    out = subprocess.run(  # nosec B603 # nosemgrep
         [cargo_path(), "package", "--quiet", "--list"],
         cwd=crate_dir, capture_output=True, text=True, encoding="utf-8",
     )
