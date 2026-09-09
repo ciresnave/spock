@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [kiss-vulkan-vocab 0.4.7] — 2026-09-09
+
+### Added — `input_shape`: what a caller HANDS a producer
+
+⚠️ `field_spec` named **concepts** — *"M-N-K plus four component types"* — and the
+input JSON uses `m`, `n`, `k`, `a`, `b`, `c`, `result`, `saturating`. **Measured:
+zero of those key names appeared delimited anywhere in the manifest.**
+
+**No vector could ever have caught it.** A producer reading different keys
+**crashes rather than mismatching** — the corpus pins what a token *spells* and
+said nothing about what a caller must *hand* a producer, which is exactly where
+a real driver integration lives.
+
+Every `field_spec` entry now carries `input_shape`, and the gate reads the
+declared key list **out of it** rather than restating it — the defect that let
+`empty_set_spelling` ship contradicting its own corpus.
+
+### Fixed — dedup equality, dissolved rather than decided
+
+`tuple_sort_key` says deduplication happens after sorting and **never says what
+makes two tuples EQUAL**. Spelled-dedup and structural-dedup diverge exactly when
+a key is **absent versus explicitly default**, and every vector carried every key
+so nothing discriminated it. A producer choosing either reading passes all 19.
+
+⚠️ **Declaring every input key REQUIRED dissolves the question instead of picking
+a side**: with no absent case the two readings coincide, which is what this
+implementation already does — `CoopShape::saturating` is a `bool`, not an
+`Option<bool>`. Born-red by omitting the exact key that makes them diverge.
+
+**baracuda's distinction is the useful half and it is new:** this gap was merely
+**UNCOVERED** — a discriminating input exists and one vector closes it — where
+`ops_alphabet`/`arith_names` are **UNDISCRIMINABLE**, no vector can ever exist.
+⚠️ **The two look identical from inside a passing corpus and only one is fixable.**
+
+### Added — `coverage_note` states what four rounds of reproduction did NOT establish
+
+    residue reported by a foreign producer:  8  ->  6  ->  3
+    new questions created by the fixes:      4, one per round
+
+Flags → how they sort → where escapes sort → whether dimensions compare as text
+→ what makes two tuples equal. ⚠️ **The residue is falling and the discovery rate
+is not, which says this surface is being REFINED rather than consumed:** each
+statement made precise enough to check exposes the next thing it does not say.
+
+**A reader is now told so.** *Treat a passing reproduction as evidence about the
+vectors, never as evidence that the prose is complete.*
+
+`vectors_digest` unchanged: `field_spec` and `coverage_note` are not in the
+`vectors` array.
+
 ## [kiss-vulkan-vocab 0.4.6] — 2026-09-06
 
 ### Added — the two orderings no vector can ever test
